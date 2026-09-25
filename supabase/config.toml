@@ -1,0 +1,5 @@
+[functions.generate-checklist]
+verify_jwt = true
+
+[functions.send-reminders]
+verify_jwt = false
