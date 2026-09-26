@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useFamily } from '@/context/FamilyContext'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
@@ -19,11 +19,17 @@ type Tab = 'overview' | 'checklists' | 'routines' | 'appointments' | 'vaccinatio
 
 export function PetDetailPage() {
   const { petId } = useParams()
+  const [searchParams] = useSearchParams()
+  const initialTab = (searchParams.get('tab') as Tab) || 'overview'
   const navigate = useNavigate()
   const { family } = useFamily()
   const { user } = useAuth()
   const [pet, setPet] = useState<Pet | null>(null)
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTab] = useState<Tab>(
+    ['overview', 'checklists', 'routines', 'appointments', 'vaccinations'].includes(initialTab)
+      ? initialTab
+      : 'overview'
+  )
   const [loading, setLoading] = useState(true)
 
   // Pet Edit & Delete states

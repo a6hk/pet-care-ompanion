@@ -4,8 +4,10 @@ import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { Link } from 'react-router-dom'
 import {
-  CheckCircle2, Circle, Plus, Sparkles, Trash2, Calendar,
-  Clock, Stethoscope, Syringe, Pill, Filter
+  CheckCircle2, Circle, Plus, Sparkles, Trash2,
+  Clock, Stethoscope, Syringe, Pill, Filter, Search,
+  Sunrise, Sun, Moon, CalendarCheck2, PartyPopper, Check, ExternalLink,
+  Layers, ChevronRight, X
 } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { formatTime, formatDate, speciesIcon, cn } from '@/lib/utils'
@@ -27,6 +29,8 @@ export interface UnifiedTodayTask {
   originalItem?: any
 }
 
+type TimeBlock = 'morning' | 'afternoon' | 'evening' | 'anytime'
+
 export function ChecklistsPage() {
   const { family } = useFamily()
   const { user } = useAuth()
@@ -38,6 +42,9 @@ export function ChecklistsPage() {
   const [vaccinations, setVaccinations] = useState<Vaccination[]>([])
   const [selectedPetId, setSelectedPetId] = useState<string>('all')
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'pending' | 'completed'>('all')
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [viewMode, setViewMode] = useState<'time_grouped' | 'list'>('time_grouped')
   const [loading, setLoading] = useState(true)
 
   // Local storage completion persistence for daily routines / events today
@@ -194,7 +201,6 @@ export function ChecklistsPage() {
         continue
       }
       const pet = petMap.get(cl.pet_id)
-      const isMed = cl.source === 'ai_vet' || cl.title.toLowerCase().includes('med')
       list.push({
         id: `item_${item.id}`,
         taskType: 'checklist_item',
@@ -260,14 +266,56 @@ export function ChecklistsPage() {
       if (selectedPetId !== 'all' && t.petId !== selectedPetId) return false
       if (selectedFilter === 'pending' && t.completed) return false
       if (selectedFilter === 'completed' && !t.completed) return false
+
+      if (selectedCategory !== 'all') {
+        if (selectedCategory === 'feeding' && t.taskType !== 'routine_feeding') return false
+        if (selectedCategory === 'walking' && t.taskType !== 'routine_walking') return false
+        if (selectedCategory === 'checklist' && t.taskType !== 'checklist_item') return false
+        if (selectedCategory === 'medical' && t.taskType !== 'appointment' && t.taskType !== 'vaccination') return false
+      }
+
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase()
+        const matchTitle = t.title.toLowerCase().includes(query)
+        const matchPet = t.petName.toLowerCase().includes(query)
+        const matchSub = (t.subtitle || '').toLowerCase().includes(query)
+        if (!matchTitle && !matchPet && !matchSub) return false
+      }
+
       return true
     })
-  }, [unifiedTasks, selectedPetId, selectedFilter])
+  }, [unifiedTasks, selectedPetId, selectedFilter, selectedCategory, searchQuery])
 
   // Stats
   const totalCount = unifiedTasks.length
   const completedCount = unifiedTasks.filter((t) => t.completed).length
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
+
+  // Time Block categorization helper
+  function getTimeBlock(time: string | null): TimeBlock {
+    if (!time) return 'anytime'
+    const hour = parseInt(time.split(':')[0], 10)
+    if (isNaN(hour)) return 'anytime'
+    if (hour < 12) return 'morning'
+    if (hour < 17) return 'afternoon'
+    return 'evening'
+  }
+
+  const groupedTasks = useMemo(() => {
+    const groups: Record<TimeBlock, UnifiedTodayTask[]> = {
+      morning: [],
+      afternoon: [],
+      evening: [],
+      anytime: [],
+    }
+
+    for (const task of filteredTasks) {
+      const block = getTimeBlock(task.time)
+      groups[block].push(task)
+    }
+
+    return groups
+  }, [filteredTasks])
 
   // Toggle completion
   async function toggleUnifiedTask(task: UnifiedTodayTask) {
@@ -333,11 +381,11 @@ export function ChecklistsPage() {
       case 'routine_walking':
         return '🦮'
       case 'appointment':
-        return <Stethoscope className="w-3.5 h-3.5" />
+        return <Stethoscope className="w-3.5 h-3.5 text-secondary-600" />
       case 'vaccination':
-        return <Syringe className="w-3.5 h-3.5" />
+        return <Syringe className="w-3.5 h-3.5 text-success-600" />
       case 'checklist_item':
-        return <Pill className="w-3.5 h-3.5" />
+        return <Pill className="w-3.5 h-3.5 text-primary-600" />
     }
   }
 
@@ -352,28 +400,71 @@ export function ChecklistsPage() {
       case 'vaccination':
         return 'Vaccine'
       case 'checklist_item':
-        return 'Checklist'
+        return 'Care Task'
     }
+  }
+
+  const timeBlockConfig: Record<
+    TimeBlock,
+    { title: string; subtitle: string; icon: typeof Sunrise; color: string; badgeBg: string }
+  > = {
+    morning: {
+      title: 'Morning Care',
+      subtitle: 'Before 12:00 PM',
+      icon: Sunrise,
+      color: 'text-amber-500',
+      badgeBg: 'bg-amber-50 text-amber-700 border-amber-200/60',
+    },
+    afternoon: {
+      title: 'Afternoon Care',
+      subtitle: '12:00 PM – 5:00 PM',
+      icon: Sun,
+      color: 'text-primary-600',
+      badgeBg: 'bg-primary-50 text-primary-700 border-primary-200/60',
+    },
+    evening: {
+      title: 'Evening Care',
+      subtitle: '5:00 PM onwards',
+      icon: Moon,
+      color: 'text-indigo-500',
+      badgeBg: 'bg-indigo-50 text-indigo-700 border-indigo-200/60',
+    },
+    anytime: {
+      title: 'Anytime Today',
+      subtitle: 'Flexible daily tasks',
+      icon: CalendarCheck2,
+      color: 'text-gray-500',
+      badgeBg: 'bg-gray-50 text-gray-700 border-gray-200/60',
+    },
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <p className="text-gray-400">Loading today's schedule and activities...</p>
+      <div className="flex items-center justify-center py-24">
+        <div className="text-center space-y-3">
+          <div className="w-10 h-10 border-3 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm font-medium text-gray-500">Loading today's schedule and activities...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Today's Care Checklist</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Combined feeding, walking, appointments, vaccines, and daily care for {formatDate(todayDateStr)}
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Today's Care Checklist</h1>
+            <span className="badge bg-primary-50 text-primary-700 border border-primary-100 text-xs">
+              {formatDate(todayDateStr)}
+            </span>
+          </div>
+          <p className="text-sm text-gray-500 mt-1">
+            Unified feeding, walking, medications, and health care schedule across your pets.
           </p>
         </div>
+
         <div className="flex items-center gap-2">
           <Link to="/app/pets" className="btn-primary">
             <Plus className="w-4 h-4" /> Add Routine or Task
@@ -381,227 +472,375 @@ export function ChecklistsPage() {
         </div>
       </div>
 
-      {/* Progress & Overview Card */}
+      {/* Progress & Overview Hero Banner */}
       {totalCount > 0 && (
-        <div className="card p-5 bg-gradient-to-r from-primary-500/10 via-white to-secondary-500/10 border border-primary-100">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold text-primary-700 uppercase tracking-wider">Today's Progress</p>
-              <h2 className="text-xl font-bold text-gray-900 mt-0.5">
-                {completedCount} of {totalCount} activities completed
-              </h2>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-36 sm:w-48 h-3 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary-600 rounded-full transition-all duration-500"
-                  style={{ width: `${progressPercent}%` }}
-                />
+        <div className="card p-5 sm:p-6 bg-gradient-to-br from-primary-600/10 via-white to-secondary-500/10 border border-primary-100 shadow-sm relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-primary-600 animate-pulse" />
+                <p className="text-xs font-bold uppercase tracking-wider text-primary-800">
+                  Daily Care Completion
+                </p>
               </div>
-              <span className="text-sm font-bold text-primary-800">{progressPercent}%</span>
+              <h2 className="text-xl sm:text-2xl font-extrabold text-gray-900">
+                {completedCount === totalCount ? (
+                  <span className="flex items-center gap-2 text-success-700">
+                    <PartyPopper className="w-6 h-6 text-success-600" /> All pet care completed for today!
+                  </span>
+                ) : (
+                  <span>
+                    {completedCount} of {totalCount} activities completed
+                  </span>
+                )}
+              </h2>
+              <p className="text-xs sm:text-sm text-gray-600">
+                {completedCount === totalCount
+                  ? "Great job! Your family has taken care of all scheduled routines and checklists."
+                  : `${totalCount - completedCount} activity remaining today. Keep up the great care!`}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-4 shrink-0">
+              <div className="flex flex-col items-end gap-1.5">
+                <span className="text-2xl sm:text-3xl font-black text-primary-700 tabular-nums">
+                  {progressPercent}%
+                </span>
+                <div className="w-36 sm:w-48 h-3 bg-gray-200/80 rounded-full overflow-hidden p-0.5">
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-all duration-700 ease-out',
+                      progressPercent === 100 ? 'bg-success-500' : 'bg-primary-600'
+                    )}
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Filter Tabs: By Pet & Status */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
-        {/* Pets filter tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
-          <button
-            onClick={() => setSelectedPetId('all')}
-            className={cn(
-              'px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all',
-              selectedPetId === 'all'
-                ? 'bg-primary-600 text-white shadow-sm'
-                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-            )}
-          >
-            All Pets ({pets.length})
-          </button>
-          {pets.map((p) => (
+      {/* Controls: Pet Filter, Categories, Search, View Toggle */}
+      <div className="space-y-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-xs">
+        {/* Top Filter Row: Pets & Search */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          {/* Pet Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
             <button
-              key={p.id}
-              onClick={() => setSelectedPetId(p.id)}
+              onClick={() => setSelectedPetId('all')}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all',
-                selectedPetId === p.id
-                  ? 'bg-primary-600 text-white shadow-sm'
-                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                'px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all',
+                selectedPetId === 'all'
+                  ? 'bg-primary-600 text-white shadow-xs'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200/60'
               )}
             >
-              <span>{speciesIcon(p.species)}</span>
-              <span>{p.name}</span>
+              All Pets ({pets.length})
             </button>
-          ))}
+            {pets.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedPetId(p.id)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all',
+                  selectedPetId === p.id
+                    ? 'bg-primary-600 text-white shadow-xs'
+                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200/60'
+                )}
+              >
+                <span>{speciesIcon(p.species)}</span>
+                <span>{p.name}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Search Box */}
+          <div className="relative min-w-[220px]">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search today's tasks..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-7 py-1.5 bg-gray-50 border border-gray-200/70 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Status filter buttons */}
-        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl self-start sm:self-auto">
-          <button
-            onClick={() => setSelectedFilter('all')}
-            className={cn(
-              'px-3 py-1 rounded-lg text-xs font-medium transition-colors',
-              selectedFilter === 'all' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
-            )}
-          >
-            All ({totalCount})
-          </button>
-          <button
-            onClick={() => setSelectedFilter('pending')}
-            className={cn(
-              'px-3 py-1 rounded-lg text-xs font-medium transition-colors',
-              selectedFilter === 'pending' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
-            )}
-          >
-            To Do ({totalCount - completedCount})
-          </button>
-          <button
-            onClick={() => setSelectedFilter('completed')}
-            className={cn(
-              'px-3 py-1 rounded-lg text-xs font-medium transition-colors',
-              selectedFilter === 'completed' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
-            )}
-          >
-            Done ({completedCount})
-          </button>
+        {/* Secondary Filter Row: Category & Status */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100">
+          {/* Category Chips */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { id: 'all', label: 'All Types' },
+              { id: 'feeding', label: '🍽️ Feedings' },
+              { id: 'walking', label: '🦮 Walks' },
+              { id: 'checklist', label: '💊 Checklists' },
+              { id: 'medical', label: '🩺 Vet & Vaccine' },
+            ].map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={cn(
+                  'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors',
+                  selectedCategory === cat.id
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200/70'
+                )}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Status Segmented Control */}
+          <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
+            <button
+              onClick={() => setSelectedFilter('all')}
+              className={cn(
+                'px-2.5 py-1 rounded-lg text-xs font-semibold transition-all',
+                selectedFilter === 'all'
+                  ? 'bg-white text-gray-900 shadow-xs'
+                  : 'text-gray-500 hover:text-gray-800'
+              )}
+            >
+              All ({totalCount})
+            </button>
+            <button
+              onClick={() => setSelectedFilter('pending')}
+              className={cn(
+                'px-2.5 py-1 rounded-lg text-xs font-semibold transition-all',
+                selectedFilter === 'pending'
+                  ? 'bg-white text-gray-900 shadow-xs'
+                  : 'text-gray-500 hover:text-gray-800'
+              )}
+            >
+              To Do ({totalCount - completedCount})
+            </button>
+            <button
+              onClick={() => setSelectedFilter('completed')}
+              className={cn(
+                'px-2.5 py-1 rounded-lg text-xs font-semibold transition-all',
+                selectedFilter === 'completed'
+                  ? 'bg-white text-gray-900 shadow-xs'
+                  : 'text-gray-500 hover:text-gray-800'
+              )}
+            >
+              Done ({completedCount})
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Main Unified Task List */}
+      {/* Main Task Feed */}
       {filteredTasks.length === 0 ? (
-        <div className="card">
+        <div className="card p-8">
           <EmptyState
-            icon={<CheckCircle2 className="w-10 h-10" />}
+            icon={<CalendarCheck2 className="w-10 h-10 text-primary-400" />}
             title={totalCount === 0 ? "No activities scheduled for today" : "No matching activities"}
             description={
               totalCount === 0
-                ? "Set up daily routines (breakfast, dinner, walks), schedule appointments, or create checklists in your pet's profile."
-                : "You're all caught up for the selected filter!"
+                ? "Set up daily feeding routines, walking schedules, or health checklists in your pet's passport."
+                : "Try adjusting your search terms or filter selections."
             }
             action={
               totalCount === 0 ? (
                 <Link to="/app/pets" className="btn-primary">
-                  <Sparkles className="w-4 h-4" /> Go to Pet Profiles
+                  <Sparkles className="w-4 h-4" /> Go to Pet Passports
                 </Link>
               ) : undefined
             }
           />
         </div>
       ) : (
-        <div className="card p-4 sm:p-5 divide-y divide-gray-100">
-          {filteredTasks.map((task) => (
-            <div
-              key={task.id}
-              className="py-3 first:pt-0 last:pb-0 flex items-start sm:items-center justify-between gap-3 group"
-            >
-              <button
-                type="button"
-                onClick={() => toggleUnifiedTask(task)}
-                className="flex items-start sm:items-center gap-3.5 flex-1 min-w-0 text-left cursor-pointer"
-              >
-                <div className="mt-0.5 sm:mt-0 flex-shrink-0">
-                  {task.completed ? (
-                    <CheckCircle2 className="w-6 h-6 text-success-500 animate-check-pop" />
-                  ) : (
-                    <Circle className="w-6 h-6 text-gray-300 group-hover:text-primary-500 transition-colors" />
-                  )}
+        <div className="space-y-6">
+          {(['morning', 'afternoon', 'evening', 'anytime'] as TimeBlock[]).map((block) => {
+            const blockTasks = groupedTasks[block]
+            if (blockTasks.length === 0) return null
+
+            const blockCfg = timeBlockConfig[block]
+            const BlockIcon = blockCfg.icon
+            const blockCompleted = blockTasks.filter((t) => t.completed).length
+
+            return (
+              <div key={block} className="space-y-2.5">
+                {/* Block Header */}
+                <div className="flex items-center justify-between px-1">
+                  <div className="flex items-center gap-2">
+                    <div className={cn('p-1.5 rounded-lg bg-gray-100', blockCfg.color)}>
+                      <BlockIcon className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+                        {blockCfg.title}
+                        <span className="text-xs font-normal text-gray-400">({blockCfg.subtitle})</span>
+                      </h2>
+                    </div>
+                  </div>
+                  <span className="text-xs font-semibold text-gray-500">
+                    {blockCompleted}/{blockTasks.length} done
+                  </span>
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
+                {/* Block Tasks Card */}
+                <div className="card divide-y divide-gray-100 overflow-hidden shadow-xs">
+                  {blockTasks.map((task) => (
+                    <div
+                      key={task.id}
                       className={cn(
-                        'text-base font-semibold transition-all',
-                        task.completed ? 'text-gray-400 line-through' : 'text-gray-900'
+                        'p-3.5 sm:p-4 flex items-start sm:items-center justify-between gap-3 transition-colors group hover:bg-gray-50/70',
+                        task.completed && 'bg-gray-50/40'
                       )}
                     >
-                      {task.title}
-                    </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleUnifiedTask(task)}
+                        className="flex items-start sm:items-center gap-3.5 flex-1 min-w-0 text-left cursor-pointer"
+                      >
+                        <div className="mt-0.5 sm:mt-0 flex-shrink-0">
+                          {task.completed ? (
+                            <div className="w-6 h-6 rounded-full bg-success-500 text-white flex items-center justify-center animate-check-pop shadow-xs">
+                              <Check className="w-3.5 h-3.5 stroke-[3]" />
+                            </div>
+                          ) : (
+                            <Circle className="w-6 h-6 text-gray-300 group-hover:text-primary-500 transition-colors" />
+                          )}
+                        </div>
 
-                    {/* Activity Type Badge */}
-                    <span className="badge bg-gray-100 text-gray-700 text-xs">
-                      {getBadgeIcon(task.taskType)} {getBadgeLabel(task.taskType)}
-                    </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={cn(
+                                'text-sm sm:text-base font-semibold transition-all',
+                                task.completed ? 'text-gray-400 line-through' : 'text-gray-900'
+                              )}
+                            >
+                              {task.title}
+                            </span>
 
-                    {/* Pet Name Tag */}
-                    <Link
-                      to={`/app/pets/${task.petId}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-xs font-medium text-primary-600 hover:underline flex items-center gap-1"
-                    >
-                      {speciesIcon(task.species)} {task.petName}
-                    </Link>
-                  </div>
+                            {/* Badge */}
+                            <span className="badge bg-gray-100 text-gray-700 text-[11px] font-medium border border-gray-200/50">
+                              {getBadgeIcon(task.taskType)} {getBadgeLabel(task.taskType)}
+                            </span>
 
-                  {task.subtitle && (
-                    <p className={cn('text-xs mt-0.5', task.completed ? 'text-gray-300' : 'text-gray-500')}>
-                      {task.subtitle}
-                    </p>
-                  )}
+                            {/* Pet link chip */}
+                            <Link
+                              to={`/app/pets/${task.petId}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-xs font-medium text-primary-700 hover:text-primary-800 bg-primary-50/80 px-2 py-0.5 rounded-md hover:underline flex items-center gap-1 border border-primary-100/60"
+                            >
+                              {speciesIcon(task.species)} {task.petName}
+                            </Link>
+                          </div>
+
+                          {task.subtitle && (
+                            <p className={cn('text-xs mt-0.5', task.completed ? 'text-gray-400' : 'text-gray-500')}>
+                              {task.subtitle}
+                            </p>
+                          )}
+                        </div>
+                      </button>
+
+                      {/* Time display */}
+                      <div className="flex items-center gap-3 shrink-0">
+                        {task.time ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-50 text-gray-700 border border-gray-200/70 shadow-2xs">
+                            <Clock className="w-3.5 h-3.5 text-gray-400" />
+                            {formatTime(task.time)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400 font-medium">Anytime</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </button>
-
-              {/* Time display */}
-              <div className="flex items-center gap-3 shrink-0">
-                {task.time ? (
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-50 text-gray-700 border border-gray-100">
-                    <Clock className="w-3.5 h-3.5 text-gray-400" />
-                    {formatTime(task.time)}
-                  </span>
-                ) : (
-                  <span className="text-xs text-gray-400">Anytime</span>
-                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
-      {/* Standalone Checklists Section */}
+      {/* Checklist Collections Section */}
       {checklists.length > 0 && (
-        <div className="pt-6 border-t border-gray-200">
-          <div className="flex items-center justify-between mb-4">
+        <div className="pt-8 border-t border-gray-200 space-y-4">
+          <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-bold text-gray-900">Checklist Collections</h2>
-              <p className="text-xs text-gray-500">Manage checklist containers and recurring templates</p>
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <Layers className="w-5 h-5 text-primary-600" /> Checklist Collections & Programs
+              </h2>
+              <p className="text-xs text-gray-500">
+                Custom checklists, medical programs, and recurring care packages.
+              </p>
             </div>
+            <Link to="/app/pets" className="text-xs font-semibold text-primary-600 hover:text-primary-800 flex items-center gap-1">
+              Manage in Pets <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
 
-          <div className="grid sm:grid-cols-2 gap-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {checklists.map((cl) => {
               const clPet = pets.find((p) => p.id === cl.pet_id)
               const items = checklistItems.filter((i) => i.checklist_id === cl.id)
               const comp = items.filter((i) => i.completed).length
+              const clPercent = items.length > 0 ? Math.round((comp / items.length) * 100) : 0
 
               return (
-                <div key={cl.id} className="card p-4 flex flex-col justify-between">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="text-xs text-primary-600 font-medium">
-                        {clPet ? `${speciesIcon(clPet.species)} ${clPet.name}` : 'Pet'}
-                      </span>
-                      <h3 className="font-semibold text-gray-900 text-sm mt-0.5">{cl.title}</h3>
-                      <div className="flex items-center gap-1.5 mt-1.5">
-                        <span className="badge bg-primary-50 text-primary-700 text-xs">
-                          {cl.type === 'recurring' ? 'Recurring' : 'Time-limited'}
+                <div
+                  key={cl.id}
+                  className="card p-4 flex flex-col justify-between hover:shadow-md transition-all border border-gray-100 bg-white group"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="text-xs text-primary-600 font-bold flex items-center gap-1">
+                          {clPet ? `${speciesIcon(clPet.species)} ${clPet.name}` : 'Pet'}
                         </span>
-                        <span className="badge bg-gray-100 text-gray-600 text-xs">
-                          {cl.source.replace('ai_', 'AI ').replace('_', ' ')}
-                        </span>
+                        <h3 className="font-semibold text-gray-900 text-sm mt-0.5 group-hover:text-primary-700 transition-colors">
+                          {cl.title}
+                        </h3>
                       </div>
+                      <button
+                        onClick={() => deleteChecklist(cl.id)}
+                        className="p-1.5 text-gray-400 hover:text-error-500 rounded-lg hover:bg-gray-50 transition-colors opacity-0 group-hover:opacity-100"
+                        title="Delete checklist collection"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => deleteChecklist(cl.id)}
-                      className="p-1.5 text-gray-400 hover:text-error-500 rounded-lg hover:bg-gray-50 transition-colors"
-                      title="Delete checklist collection"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                      <span className="badge bg-primary-50 text-primary-700 text-[11px] font-semibold">
+                        {cl.type === 'recurring' ? '🔄 Daily Recurring' : '📅 Time-Limited'}
+                      </span>
+                      <span className="badge bg-gray-100 text-gray-600 text-[11px]">
+                        {cl.source.replace('ai_', 'AI ').replace('_', ' ')}
+                      </span>
+                    </div>
                   </div>
-                  <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
-                    <span>{items.length} items total</span>
-                    <span className="font-medium text-gray-700">{comp} completed</span>
+
+                  <div className="mt-4 pt-3 border-t border-gray-100">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="text-gray-500 font-medium">
+                        {comp} of {items.length} items
+                      </span>
+                      <span className="font-bold text-primary-700">{clPercent}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary-500 rounded-full transition-all duration-500"
+                        style={{ width: `${clPercent}%` }}
+                      />
+                    </div>
                   </div>
                 </div>
               )
