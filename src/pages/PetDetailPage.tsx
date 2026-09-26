@@ -350,7 +350,7 @@ export function PetDetailPage() {
     }
   }
 
-  async function saveChecklist(source: 'ai_vet' | 'ai_program' | 'manual') {
+  async function saveChecklist(source: 'ai_vet' | 'ai_routine' | 'manual') {
     if (!pet || !family || editingItems.length === 0) return
     setError(null)
 
@@ -2088,7 +2088,7 @@ export function PetDetailPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => saveChecklist(showAI === 'vet' ? 'ai_vet' : 'ai_program')}
+                  onClick={() => saveChecklist(showAI === 'vet' ? 'ai_vet' : 'ai_routine')}
                   disabled={editingItems.filter((i) => i.title.trim()).length === 0}
                   className="btn-primary flex-1 text-xs py-2.5 font-bold shadow-sm"
                 >
