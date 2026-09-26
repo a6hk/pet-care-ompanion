@@ -11,7 +11,8 @@ import {
 import { Modal } from '@/components/Modal'
 import { EmptyState } from '@/components/EmptyState'
 import { calculateAge, formatTime, formatDate, speciesIcon, cn } from '@/lib/utils'
-import { parseVetInstructionsToTasks, generateSpecializedCareProgram, parsePrescriptionImageAndText } from '@/lib/aiChecklistParser'
+import { parseVetInstructionsToTasks, generateSpecializedCareProgram, parsePrescriptionImageAndText, type ExtractedPrescriptionDetails } from '@/lib/aiChecklistParser'
+import { hasGeminiApiKey, extractVetCarePlanWithGemini, generateCareProgramWithGemini } from '@/lib/gemini'
 import {
   parseNaturalLanguageRoutines,
   parseNaturalLanguageAppointment,
@@ -271,13 +272,36 @@ export function PetDetailPage() {
       let result: { title: string; items: { title: string; due_time: string | null }[] } | null = null
 
       if (type === 'vet') {
-        const parsedDetails = parsePrescriptionImageAndText(
-          aiInput.trim(),
-          null,
-          pet.name,
-          pet.species,
-          pet.breed
-        )
+        let parsedDetails: ExtractedPrescriptionDetails
+
+        if (hasGeminiApiKey()) {
+          try {
+            parsedDetails = await extractVetCarePlanWithGemini(
+              aiInput.trim(),
+              pet.name,
+              pet.species,
+              pet.breed
+            )
+          } catch (geminiErr) {
+            console.warn('Gemini Vet AI parsing failed, falling back to local clinical parser:', geminiErr)
+            parsedDetails = parsePrescriptionImageAndText(
+              aiInput.trim(),
+              null,
+              pet.name,
+              pet.species,
+              pet.breed
+            )
+          }
+        } else {
+          parsedDetails = parsePrescriptionImageAndText(
+            aiInput.trim(),
+            null,
+            pet.name,
+            pet.species,
+            pet.breed
+          )
+        }
+
         result = {
           title: parsedDetails.checklistTitle,
           items: parsedDetails.items,
@@ -295,7 +319,21 @@ export function PetDetailPage() {
         )
       } else {
         // Specialized Care & Training Program
-        result = generateSpecializedCareProgram(pet.name, pet.species, 'general', aiInput)
+        if (hasGeminiApiKey()) {
+          try {
+            result = await generateCareProgramWithGemini(
+              pet.name,
+              pet.species,
+              pet.breed,
+              aiInput
+            )
+          } catch (geminiErr) {
+            console.warn('Gemini care program failed, falling back to local generator:', geminiErr)
+            result = generateSpecializedCareProgram(pet.name, pet.species, 'general', aiInput)
+          }
+        } else {
+          result = generateSpecializedCareProgram(pet.name, pet.species, 'general', aiInput)
+        }
       }
 
       setAiResult(result)
@@ -1799,9 +1837,17 @@ export function PetDetailPage() {
               </div>
 
               <div>
-                <label className="label text-xs font-bold text-gray-700 uppercase">
-                  {showAI === 'vet' ? 'Vet Instructions / Discharge Notes' : 'Specialized Care / Training Goal'}
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label text-xs font-bold text-gray-700 uppercase mb-0">
+                    {showAI === 'vet' ? 'Vet Instructions / Discharge Notes' : 'Specialized Care / Training Goal'}
+                  </label>
+                  {hasGeminiApiKey() && (
+                    <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-emerald-600" />
+                      <span>Gemini 2.5 Flash</span>
+                    </span>
+                  )}
+                </div>
                 <textarea
                   value={aiInput}
                   onChange={(e) => setAiInput(e.target.value)}
@@ -1825,7 +1871,7 @@ export function PetDetailPage() {
                 {aiLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Structuring checklist with AI...</span>
+                    <span>{hasGeminiApiKey() ? 'Analyzing with Gemini 2.5 Flash...' : 'Structuring checklist with AI...'}</span>
                   </>
                 ) : (
                   <>

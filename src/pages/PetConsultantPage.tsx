@@ -6,9 +6,11 @@ import { useNavigate } from 'react-router-dom'
 import {
   Sparkles, Send, Bot, User, Trash2, Copy, Check,
   AlertTriangle, ArrowRight, Calendar, CheckSquare,
-  ShieldCheck, HelpCircle, RefreshCw, PawPrint
+  ShieldCheck, HelpCircle, RefreshCw, PawPrint, Key, ExternalLink
 } from 'lucide-react'
+import { Modal } from '@/components/Modal'
 import { getPetConsultantResponse, type ChatMessage } from '@/lib/petConsultantAI'
+import { getGeminiApiKey, setGeminiApiKey, hasGeminiApiKey } from '@/lib/gemini'
 import { speciesIcon, cn } from '@/lib/utils'
 import type { Pet } from '@/types'
 
@@ -50,6 +52,17 @@ export function PetConsultantPage() {
   const [inputQuery, setInputQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  // Gemini API Key State
+  const [showKeyModal, setShowKeyModal] = useState(false)
+  const [apiKeyInput, setApiKeyInput] = useState(() => getGeminiApiKey())
+  const [hasApiKey, setHasApiKey] = useState(() => hasGeminiApiKey())
+
+  function handleSaveApiKey() {
+    setGeminiApiKey(apiKeyInput)
+    setHasApiKey(hasGeminiApiKey())
+    setShowKeyModal(false)
+  }
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     try {
@@ -212,8 +225,24 @@ Choose one of your registered pets above to get personalized advice, or click an
             </div>
           </div>
 
-          {/* Chat Control */}
+          {/* Chat Controls & Key Status */}
           <div className="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              onClick={() => {
+                setApiKeyInput(getGeminiApiKey())
+                setShowKeyModal(true)
+              }}
+              className={cn(
+                "px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border shadow-xs",
+                hasApiKey
+                  ? "bg-emerald-500/20 text-emerald-200 border-emerald-400/40 hover:bg-emerald-500/30"
+                  : "bg-amber-500/20 text-amber-200 border-amber-400/40 hover:bg-amber-500/30"
+              )}
+              title="Configure Gemini API Key"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span>{hasApiKey ? 'Gemini 2.5 Flash' : 'Connect Gemini Key'}</span>
+            </button>
             <button
               onClick={handleClearChat}
               className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-purple-100 hover:text-white text-xs font-medium flex items-center gap-1.5 transition-all border border-white/10"
@@ -411,9 +440,71 @@ Choose one of your registered pets above to get personalized advice, or click an
         </form>
 
         <p className="text-[10px] text-center text-gray-400 leading-tight">
-          ⚠️ <strong>Veterinary Disclaimer:</strong> PetPal AI Consultant provides educational animal care guidance. For severe distress, suspected poisoning, or medical emergencies, consult a licensed veterinarian or emergency clinic immediately.
+          ⚡ Powered by Google Gemini 2.5 Flash • ⚠️ <strong>Veterinary Disclaimer:</strong> PetPal AI Consultant provides educational animal care guidance. For severe distress, suspected poisoning, or medical emergencies, consult a licensed veterinarian or emergency clinic immediately.
         </p>
       </div>
+
+      {/* Gemini API Key Configuration Modal */}
+      <Modal
+        open={showKeyModal}
+        onClose={() => setShowKeyModal(false)}
+        title="Google Gemini AI Settings"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="p-3.5 rounded-2xl bg-purple-50 border border-purple-100 flex items-start gap-3">
+            <Sparkles className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
+            <div className="text-xs text-purple-900 space-y-1">
+              <p className="font-bold">Powered by Gemini 2.5 Flash</p>
+              <p className="text-purple-700 leading-relaxed">
+                Connect your Google Gemini API key to enable high-speed veterinary triage, custom checklists, and conversational consultations across all of PetPal.
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label className="label text-xs font-bold text-gray-700 uppercase">
+              Gemini API Key
+            </label>
+            <input
+              type="password"
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+              placeholder="AIzaSy..."
+              className="input text-sm font-mono"
+            />
+            <p className="text-[11px] text-gray-500 mt-1.5 flex items-center justify-between">
+              <span>You can also set <code>VITE_GEMINI_API_KEY</code> in your <code>.env</code> file.</span>
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary-600 hover:text-primary-700 font-semibold inline-flex items-center gap-1 shrink-0"
+              >
+                <span>Get Free Key</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => setShowKeyModal(false)}
+              className="btn-ghost text-xs"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveApiKey}
+              className="btn-primary text-xs"
+            >
+              Save Key
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

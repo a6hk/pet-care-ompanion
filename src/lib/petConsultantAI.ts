@@ -1,4 +1,5 @@
 import type { Pet } from '@/types'
+import { hasGeminiApiKey, getGeminiConsultantChat } from './gemini'
 
 export interface ChatMessage {
   id: string
@@ -16,8 +17,8 @@ export interface ChatMessage {
 
 /**
  * AI Pet Care Consultant Engine
- * Provides veterinary-informed, comprehensive consultations for adoption,
- * symptom checking, behavior training, nutrition, and everyday pet care.
+ * Uses Google Gemini (gemini-2.5-flash) when API key is present,
+ * with comprehensive veterinary-informed fallback.
  */
 export async function getPetConsultantResponse(
   query: string,
@@ -37,8 +38,23 @@ export async function getPetConsultantResponse(
   const cleanQuery = query.trim()
   const lower = cleanQuery.toLowerCase()
 
-  // Simulate network thinking time for natural conversation flow
-  await new Promise((resolve) => setTimeout(resolve, 600))
+  // 1. If Gemini API key is available, use real Gemini 2.5 Flash
+  if (hasGeminiApiKey()) {
+    try {
+      const geminiResult = await getGeminiConsultantChat(
+        cleanQuery,
+        selectedPet,
+        allPets,
+        chatHistory
+      )
+      return geminiResult
+    } catch (err) {
+      console.warn('Gemini chat request failed, falling back to local engine:', err)
+    }
+  }
+
+  // Fallback: local expert consultant engine
+  await new Promise((resolve) => setTimeout(resolve, 500))
 
   const petContext = selectedPet
     ? `Regarding ${selectedPet.name} (${selectedPet.breed ? `${selectedPet.breed} ` : ''}${selectedPet.species}${selectedPet.weight ? `, ${selectedPet.weight}kg` : ''}):`
