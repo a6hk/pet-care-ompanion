@@ -388,24 +388,23 @@ export interface ExtractedPrescriptionDetails {
 
 /**
  * Intelligent parser that extracts multi-category care details (Medications,
- * Care Instructions, Routines, Appointments, and Vaccinations) from a prescription image upload
- * or pasted veterinary notes.
+ * Care Instructions, Routines, Appointments, and Vaccinations) from veterinary notes.
  */
 export function parsePrescriptionImageAndText(
   text: string,
-  imageName: string | null,
+  _imageName: string | null = null,
   petName: string,
   species: string,
   breed?: string
 ): ExtractedPrescriptionDetails {
-  const combinedPrompt = `${text || ''} ${imageName ? `[Prescription Image: ${imageName}]` : ''}`.trim()
-  const lower = combinedPrompt.toLowerCase()
+  const cleanInput = (text || '').trim()
+  const lower = cleanInput.toLowerCase()
   const todayStr = format(new Date(), 'yyyy-MM-dd')
-  const defaultChecklist = parseVetInstructionsToTasks(text || '', petName, species)
+  const defaultChecklist = parseVetInstructionsToTasks(cleanInput, petName, species)
 
   // 1. Detect Course Duration (e.g. "for 10 days", "for 2 weeks", "7 days")
   let checklistDuration = 7 // Default 7 days
-  const durationMatch = combinedPrompt.match(/(?:for|duration:?|give for|continue for)\s*(\d+)\s*(days?|weeks?)/i)
+  const durationMatch = cleanInput.match(/(?:for|duration:?|give for|continue for)\s*(\d+)\s*(days?|weeks?)/i)
   if (durationMatch) {
     const num = parseInt(durationMatch[1], 10)
     const unit = durationMatch[2].toLowerCase()
@@ -517,7 +516,7 @@ export function parsePrescriptionImageAndText(
       date: apptDate,
       time: '10:30',
       location: 'Veterinary Clinic',
-      notes: `Veterinary post-prescription re-examination (${imageName || 'Prescription notes'})`,
+      notes: 'Veterinary follow-up and recovery re-examination',
     }
   }
 

@@ -6,14 +6,12 @@ import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, Plus, Trash2, CheckCircle2, Circle, Clock, Syringe, Stethoscope, Scissors,
   Calendar as CalIcon, PawPrint, Edit2, Sparkles, FileText, X, AlertTriangle, Loader2,
-  ChevronDown, ChevronUp, Check, ExternalLink, CalendarDays, HelpCircle, Utensils, Upload, Image,
-  RotateCw, ScanLine
+  ChevronDown, ChevronUp, Check, ExternalLink, CalendarDays, HelpCircle, Utensils
 } from 'lucide-react'
 import { Modal } from '@/components/Modal'
 import { EmptyState } from '@/components/EmptyState'
 import { calculateAge, formatTime, formatDate, speciesIcon, cn } from '@/lib/utils'
 import { parseVetInstructionsToTasks, generateSpecializedCareProgram, parsePrescriptionImageAndText } from '@/lib/aiChecklistParser'
-import { extractTextFromPrescriptionImage, cleanPrescriptionOcrText } from '@/lib/prescriptionOcr'
 import {
   parseNaturalLanguageRoutines,
   parseNaturalLanguageAppointment,
@@ -63,14 +61,7 @@ export function PetDetailPage() {
   const [checklistDuration, setChecklistDuration] = useState('7')
   const [expandedChecklists, setExpandedChecklists] = useState<Record<string, boolean>>({})
 
-  // Prescription Image Upload & OCR State
-  const [prescriptionFile, setPrescriptionFile] = useState<File | null>(null)
-  const [prescriptionPreviewUrl, setPrescriptionPreviewUrl] = useState<string | null>(null)
-  const [ocrLoading, setOcrLoading] = useState(false)
-  const [ocrProgress, setOcrProgress] = useState('')
-  const [ocrSuccessMessage, setOcrSuccessMessage] = useState<string | null>(null)
-
-  // Multi-Category Extracted Results from Prescription
+  // Multi-Category Extracted Results from Vet Instructions
   const [extractedPrescriptionRoutines, setExtractedPrescriptionRoutines] = useState<
     Array<{ type: 'feeding' | 'walking'; time: string; label: string; portion?: string; notes?: string; selected: boolean }>
   >([])
@@ -86,57 +77,6 @@ export function PetDetailPage() {
   const [extractedPrescriptionVax, setExtractedPrescriptionVax] = useState<
     Array<{ vaccine_name: string; date_given: string; next_due_date: string; notes: string; selected: boolean }>
   >([])
-
-  async function scanPrescriptionImage(file: File): Promise<string> {
-    setOcrLoading(true)
-    setOcrProgress('Loading OCR scanning engine...')
-    setOcrSuccessMessage(null)
-    setError(null)
-
-    try {
-      const rawText = await extractTextFromPrescriptionImage(file, (update) => {
-        setOcrProgress(update.status)
-      })
-      const cleaned = cleanPrescriptionOcrText(rawText)
-      if (cleaned && cleaned.trim().length > 0) {
-        setAiInput((prev) => {
-          const trimmedPrev = prev.trim()
-          return trimmedPrev ? `${trimmedPrev}\n\n${cleaned}` : cleaned
-        })
-        setOcrSuccessMessage('Text extracted from photo! Review or edit below before generating.')
-      } else {
-        setOcrSuccessMessage('Photo processed, but no clear text was recognized. You can type instructions manually.')
-      }
-      return cleaned
-    } catch (err) {
-      console.error('OCR Error:', err)
-      setError('Could not scan text from this image. Please ensure the image is clear or type instructions manually.')
-      return ''
-    } finally {
-      setOcrLoading(false)
-    }
-  }
-
-  async function handlePrescriptionImageChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setPrescriptionFile(file)
-    const url = URL.createObjectURL(file)
-    setPrescriptionPreviewUrl(url)
-    // Run OCR scan automatically
-    await scanPrescriptionImage(file)
-  }
-
-  function handleRemovePrescriptionImage() {
-    if (prescriptionPreviewUrl) {
-      URL.revokeObjectURL(prescriptionPreviewUrl)
-    }
-    setPrescriptionFile(null)
-    setPrescriptionPreviewUrl(null)
-    setOcrLoading(false)
-    setOcrProgress('')
-    setOcrSuccessMessage(null)
-  }
 
   const toggleChecklistExpanded = (clId: string) => {
     setExpandedChecklists((prev) => ({
@@ -331,17 +271,9 @@ export function PetDetailPage() {
       let result: { title: string; items: { title: string; due_time: string | null }[] } | null = null
 
       if (type === 'vet') {
-        let textToParse = aiInput.trim()
-
-        // If a prescription image is attached and text is empty, scan image first
-        if (prescriptionFile && !textToParse) {
-          const scannedText = await scanPrescriptionImage(prescriptionFile)
-          textToParse = scannedText.trim()
-        }
-
         const parsedDetails = parsePrescriptionImageAndText(
-          textToParse,
-          prescriptionFile?.name || null,
+          aiInput.trim(),
+          null,
           pet.name,
           pet.species,
           pet.breed
@@ -479,7 +411,6 @@ export function PetDetailPage() {
     setChecklistType('time_limited')
     setChecklistDuration('7')
     setError(null)
-    handleRemovePrescriptionImage()
     setExtractedPrescriptionRoutines([])
     setExtractedPrescriptionAppt(null)
     setExtractedPrescriptionVax([])
@@ -1867,129 +1798,17 @@ export function PetDetailPage() {
                 </div>
               </div>
 
-              {/* Prescription Image Upload & In-Browser OCR (For Vet AI) */}
-              {showAI === 'vet' && (
-                <div className="space-y-2 border-t border-b border-gray-100 py-3 my-2">
-                  <div className="flex items-center justify-between">
-                    <label className="label text-xs font-bold text-gray-700 uppercase flex items-center gap-1.5 mb-0">
-                      <Image className="w-3.5 h-3.5 text-primary-600" />
-                      <span>Prescription / Discharge Notes Photo</span>
-                    </label>
-                    <span className="text-[11px] text-gray-400 font-medium">Automatic Text Extraction (OCR)</span>
-                  </div>
-
-                  {prescriptionPreviewUrl ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between p-3 rounded-2xl border border-primary-200 bg-primary-50/30">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <img
-                            src={prescriptionPreviewUrl}
-                            alt="Prescription Preview"
-                            className="w-12 h-12 rounded-xl object-cover ring-1 ring-gray-200 shrink-0"
-                          />
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-gray-900 truncate">
-                              {prescriptionFile?.name}
-                            </p>
-                            {ocrLoading ? (
-                              <p className="text-[11px] text-primary-700 font-semibold flex items-center gap-1.5 animate-pulse">
-                                <Loader2 className="w-3 h-3 animate-spin shrink-0 text-primary-600" />
-                                <span>{ocrProgress || 'Extracting details from photo...'}</span>
-                              </p>
-                            ) : ocrSuccessMessage ? (
-                              <p className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
-                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                <span>{ocrSuccessMessage}</span>
-                              </p>
-                            ) : (
-                              <p className="text-[11px] text-gray-500 font-medium">
-                                📷 Image attached. Text extracted below.
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => prescriptionFile && scanPrescriptionImage(prescriptionFile)}
-                            disabled={ocrLoading}
-                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-primary-700 hover:text-primary-800 hover:bg-primary-100/60 transition-colors flex items-center gap-1"
-                            title="Re-scan photo"
-                          >
-                            <RotateCw className={cn("w-3.5 h-3.5", ocrLoading && "animate-spin")} />
-                            <span>Re-scan</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleRemovePrescriptionImage}
-                            disabled={ocrLoading}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-error-600 hover:bg-white transition-colors"
-                            title="Remove image"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {ocrLoading && (
-                        <div className="p-2.5 rounded-xl bg-primary-100/50 border border-primary-200/80 text-xs text-primary-800 flex items-center gap-2">
-                          <ScanLine className="w-4 h-4 text-primary-600 animate-pulse shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex justify-between text-[11px] font-semibold text-primary-900 mb-1">
-                              <span>Scanning photo text & instructions...</span>
-                              <span>{ocrProgress}</span>
-                            </div>
-                            <div className="w-full bg-primary-200/70 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-primary-600 h-full rounded-full animate-[shimmer_1.5s_infinite] w-3/4" />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <label className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-dashed border-gray-200 hover:border-primary-400 bg-gray-50/60 hover:bg-primary-50/30 transition-all cursor-pointer group text-center">
-                      <Upload className="w-5 h-5 text-gray-400 group-hover:text-primary-600 mb-1 transition-colors" />
-                      <span className="text-xs font-semibold text-gray-700 group-hover:text-primary-700">
-                        Upload photo of veterinary prescription or discharge summary
-                      </span>
-                      <span className="text-[11px] text-gray-400 mt-0.5">
-                        AI will read text, medications, care instructions, and convert to action items
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handlePrescriptionImageChange}
-                        className="hidden"
-                      />
-                    </label>
-                  )}
-                </div>
-              )}
-
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="label text-xs font-bold text-gray-700 uppercase mb-0">
-                    {showAI === 'vet' ? 'Extracted Prescription Notes & Instructions' : 'Specialized Care / Training Goal'}
-                  </label>
-                  {showAI === 'vet' && aiInput && (
-                    <button
-                      type="button"
-                      onClick={() => setAiInput('')}
-                      className="text-[11px] text-gray-400 hover:text-error-600 transition-colors"
-                    >
-                      Clear text
-                    </button>
-                  )}
-                </div>
+                <label className="label text-xs font-bold text-gray-700 uppercase">
+                  {showAI === 'vet' ? 'Vet Instructions / Discharge Notes' : 'Specialized Care / Training Goal'}
+                </label>
                 <textarea
                   value={aiInput}
                   onChange={(e) => setAiInput(e.target.value)}
                   className="input text-sm leading-relaxed"
                   rows={4}
                   placeholder={
-                    ocrLoading
-                      ? 'Scanning text from image, please wait...'
-                      : showAI === 'vet'
+                    showAI === 'vet'
                       ? 'e.g. Give 1 tablet of Amoxicillin twice daily after meals for 7 days. Apply eye drops in the morning. No strenuous exercise for 3 days. Follow-up vet visit in 1 week...'
                       : 'e.g. Create a comprehensive puppy crate training and potty schedule, or post-spay recovery plan...'
                   }
@@ -2000,23 +1819,18 @@ export function PetDetailPage() {
 
               <button
                 onClick={() => showAI && generateAI(showAI)}
-                disabled={aiLoading || ocrLoading || (!aiInput.trim() && !prescriptionFile)}
+                disabled={aiLoading || !aiInput.trim()}
                 className="btn-accent w-full py-3 text-sm font-bold flex items-center justify-center gap-2 shadow-sm"
               >
-                {ocrLoading ? (
+                {aiLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Scanning prescription photo...</span>
-                  </>
-                ) : aiLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Structuring care & medication action items...</span>
+                    <span>Structuring checklist with AI...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>Extract & Generate Care Plan</span>
+                    <span>Generate Structured Checklist</span>
                   </>
                 )}
               </button>
