@@ -5,7 +5,8 @@ import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, Plus, Trash2, CheckCircle2, Circle, Clock, Syringe, Stethoscope, Scissors,
-  Calendar as CalIcon, PawPrint, Edit2, Sparkles, FileText, X, AlertTriangle, Loader2
+  Calendar as CalIcon, PawPrint, Edit2, Sparkles, FileText, X, AlertTriangle, Loader2,
+  ChevronDown, ChevronUp
 } from 'lucide-react'
 import { Modal } from '@/components/Modal'
 import { EmptyState } from '@/components/EmptyState'
@@ -44,6 +45,15 @@ export function PetDetailPage() {
   const [checklistTitle, setChecklistTitle] = useState('')
   const [checklistType, setChecklistType] = useState<'recurring' | 'time_limited'>('recurring')
   const [checklistDuration, setChecklistDuration] = useState('7')
+  const [expandedChecklists, setExpandedChecklists] = useState<Record<string, boolean>>({})
+
+  const toggleChecklistExpanded = (clId: string) => {
+    setExpandedChecklists((prev) => ({
+      ...prev,
+      // Default is collapsed (false), so clicking it flips undefined/false to true
+      [clId]: !prev[clId],
+    }))
+  }
 
   // Routine multi-slot state
   const [routines, setRoutines] = useState<Routine[]>([])
@@ -563,47 +573,161 @@ export function PetDetailPage() {
               />
             </div>
           ) : (
-            checklists.map((cl) => (
-              <div key={cl.id} className="card p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{cl.title}</h3>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className={cn('badge', cl.type === 'recurring' ? 'bg-primary-50 text-primary-700' : 'bg-accent-50 text-accent-700')}>
-                        {cl.type === 'recurring' ? 'Recurring' : `${checklistDuration} days`}
-                      </span>
-                      <span className="badge bg-gray-100 text-gray-600">
-                        {cl.source === 'ai_routine' ? 'AI Routine' : cl.source === 'ai_vet' ? 'AI Vet' : 'Manual'}
-                      </span>
-                      {cl.end_date && <span className="text-xs text-gray-400">Ends {formatDate(cl.end_date)}</span>}
-                    </div>
-                  </div>
-                  <button onClick={() => deleteChecklist(cl)} className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors">
-                    <Trash2 className="w-4 h-4" />
+            <div className="space-y-3">
+              {checklists.length > 1 && (
+                <div className="flex justify-end pr-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const anyCollapsed = checklists.some((c) => !expandedChecklists[c.id])
+                      const updated: Record<string, boolean> = {}
+                      checklists.forEach((c) => {
+                        updated[c.id] = anyCollapsed
+                      })
+                      setExpandedChecklists(updated)
+                    }}
+                    className="text-xs text-gray-500 hover:text-gray-800 font-medium transition-colors"
+                  >
+                    {checklists.some((c) => !expandedChecklists[c.id])
+                      ? 'Expand all checklists'
+                      : 'Collapse all checklists'}
                   </button>
                 </div>
-                <div className="space-y-1">
-                  {(items[cl.id] ?? []).map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => toggleItem(item, cl)}
-                      className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-gray-50 transition-colors text-left group"
+              )}
+
+              {checklists.map((cl) => {
+                const clItems = items[cl.id] ?? []
+                const completedCount = clItems.filter((i) => i.completed).length
+                const totalCount = clItems.length
+                const isExpanded = Boolean(expandedChecklists[cl.id])
+                const allDone = totalCount > 0 && completedCount === totalCount
+
+                return (
+                  <div key={cl.id} className="card overflow-hidden transition-all duration-200">
+                    {/* Collapsible Header */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => toggleChecklistExpanded(cl.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          toggleChecklistExpanded(cl.id)
+                        }
+                      }}
+                      className="p-4 sm:p-5 flex items-start sm:items-center justify-between gap-3 cursor-pointer hover:bg-gray-50/70 transition-colors select-none"
                     >
-                      {item.completed ? (
-                        <CheckCircle2 className="w-5 h-5 text-success-500 flex-shrink-0 animate-check-pop" />
-                      ) : (
-                        <Circle className="w-5 h-5 text-gray-300 flex-shrink-0 group-hover:text-primary-400" />
-                      )}
-                      <span className={cn('text-sm flex-1', item.completed ? 'text-gray-400 line-through' : 'text-gray-700')}>
-                        {item.title}
-                      </span>
-                      {item.due_time && <span className="text-xs text-gray-400">{formatTime(item.due_time)}</span>}
-                    </button>
-                  ))}
-                  {(items[cl.id] ?? []).length === 0 && <p className="text-sm text-gray-400 py-2">No items in this checklist</p>}
-                </div>
-              </div>
-            ))
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <h3 className="font-semibold text-gray-900 text-sm sm:text-base truncate">
+                            {cl.title}
+                          </h3>
+                          <span
+                            className={cn(
+                              'badge text-xs',
+                              cl.type === 'recurring'
+                                ? 'bg-primary-50 text-primary-700'
+                                : 'bg-accent-50 text-accent-700'
+                            )}
+                          >
+                            {cl.type === 'recurring' ? 'Recurring' : 'Time-limited'}
+                          </span>
+                          <span className="badge bg-gray-100 text-gray-600 text-xs">
+                            {cl.source === 'ai_routine'
+                              ? 'AI Routine'
+                              : cl.source === 'ai_vet'
+                              ? 'AI Vet'
+                              : 'Manual'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-gray-400">
+                          {cl.end_date && <span>Ends {formatDate(cl.end_date)}</span>}
+                          {cl.end_date && <span>•</span>}
+                          <span>{totalCount} {totalCount === 1 ? 'task' : 'tasks'}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {/* Summary badge */}
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors',
+                            allDone
+                              ? 'bg-success-50 text-success-700 border border-success-200/60'
+                              : 'bg-primary-50 text-primary-700 border border-primary-200/60'
+                          )}
+                        >
+                          {allDone && <CheckCircle2 className="w-3.5 h-3.5 text-success-600" />}
+                          {completedCount}/{totalCount} done
+                        </span>
+
+                        {/* Delete button */}
+                        <button
+                          type="button"
+                          onClick={() => deleteChecklist(cl)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors"
+                          title="Delete checklist"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+
+                        {/* Chevron button */}
+                        <button
+                          type="button"
+                          onClick={() => toggleChecklistExpanded(cl.id)}
+                          className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                          aria-label={isExpanded ? 'Collapse checklist' : 'Expand checklist'}
+                        >
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4 transition-transform duration-200" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4 transition-transform duration-200" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Expandable checklist items */}
+                    {isExpanded && (
+                      <div className="border-t border-gray-100 bg-gray-50/40 p-3 sm:p-4 space-y-1">
+                        {clItems.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => toggleItem(item, cl)}
+                            className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-white transition-all text-left group"
+                          >
+                            {item.completed ? (
+                              <CheckCircle2 className="w-5 h-5 text-success-500 flex-shrink-0 animate-check-pop" />
+                            ) : (
+                              <Circle className="w-5 h-5 text-gray-300 flex-shrink-0 group-hover:text-primary-400" />
+                            )}
+                            <span
+                              className={cn(
+                                'text-sm flex-1',
+                                item.completed ? 'text-gray-400 line-through' : 'text-gray-700'
+                              )}
+                            >
+                              {item.title}
+                            </span>
+                            {item.due_time && (
+                              <span className="text-xs text-gray-400">
+                                {formatTime(item.due_time)}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                        {clItems.length === 0 && (
+                          <p className="text-sm text-gray-400 py-2 text-center">
+                            No items in this checklist
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
       )}

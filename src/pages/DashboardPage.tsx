@@ -28,7 +28,7 @@ export function DashboardPage() {
   const togglePetExpanded = (petId: string) => {
     setExpandedPets((prev) => ({
       ...prev,
-      [petId]: prev[petId] !== undefined ? !prev[petId] : false, // defaults to true initially
+      [petId]: !prev[petId],
     }))
   }
 
@@ -123,11 +123,32 @@ export function DashboardPage() {
       const checklistMap = new Map((checklists as Checklist[] ?? []).map((c) => [c.id, c]))
       const petMap = new Map((petsData as Pet[]).map((p) => [p.id, p]))
 
-      // Saved daily completion from localStorage
+      // Fetch activity logs for today to sync daily completions across users/devices
+      const { data: todayLogs } = await supabase
+        .from('activity_log')
+        .select('action, details, created_at')
+        .eq('family_id', family.id)
+        .gte('created_at', `${todayDateStr}T00:00:00.000Z`)
+
+      const serverCompleted: Record<string, boolean> = {}
+      if (todayLogs) {
+        for (const log of todayLogs) {
+          if (log.action === 'completed_routine' && log.details) {
+            serverCompleted[log.details] = true
+          }
+        }
+      }
+
+      // Saved daily completion from localStorage merged with server completed logs
       let localDaily: Record<string, boolean> = {}
       try {
         const saved = localStorage.getItem(`petpal_daily_${todayDateStr}`)
         if (saved) localDaily = JSON.parse(saved)
+      } catch {}
+
+      const effectiveDaily = { ...localDaily, ...serverCompleted }
+      try {
+        localStorage.setItem(`petpal_daily_${todayDateStr}`, JSON.stringify(effectiveDaily))
       } catch {}
 
       const allTasks: TodaysTask[] = []
@@ -140,7 +161,7 @@ export function DashboardPage() {
           checklist_id: '',
           title: r.type === 'feeding' ? (r.portion ? `Feed: ${r.portion}` : 'Feed meal') : 'Walk',
           due_time: r.time,
-          completed: Boolean(localDaily[`routine_${r.id}`]),
+          completed: Boolean(effectiveDaily[`routine_${r.id}`]),
           completed_by: null,
           completed_at: null,
           sort_order: 0,
@@ -172,7 +193,7 @@ export function DashboardPage() {
           checklist_id: '',
           title: `${a.type === 'vet' ? '🩺 Vet' : '✂️ Grooming'}: ${a.title}`,
           due_time: a.time,
-          completed: Boolean(localDaily[`appt_${a.id}`]),
+          completed: Boolean(effectiveDaily[`appt_${a.id}`]),
           completed_by: null,
           completed_at: null,
           sort_order: 0,
@@ -191,7 +212,7 @@ export function DashboardPage() {
           checklist_id: '',
           title: `💉 Vaccine: ${v.vaccine_name}`,
           due_time: '09:00',
-          completed: Boolean(localDaily[`vax_${v.id}`]),
+          completed: Boolean(effectiveDaily[`vax_${v.id}`]),
           completed_by: null,
           completed_at: null,
           sort_order: 0,
@@ -257,7 +278,7 @@ export function DashboardPage() {
           user_id: user?.id,
           user_email: user?.email || '',
           action: 'completed_routine',
-          details: `"${task.title}" for ${task.pet_name}`,
+          details: task.id,
         })
       }
     } else {
@@ -371,12 +392,12 @@ export function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    const anyCollapsed = groupedPets.some((g) => (expandedPets[g.petId] ?? true) === false)
+                    const anyCollapsed = groupedPets.some((g) => !expandedPets[g.petId])
                     setAllExpanded(anyCollapsed)
                   }}
                   className="text-xs text-gray-500 hover:text-gray-800 font-medium transition-colors"
                 >
-                  {groupedPets.some((g) => (expandedPets[g.petId] ?? true) === false)
+                  {groupedPets.some((g) => !expandedPets[g.petId])
                     ? 'Expand all'
                     : 'Collapse all'}
                 </button>
@@ -402,7 +423,7 @@ export function DashboardPage() {
           ) : (
             <div className="space-y-3">
               {groupedPets.map((group) => {
-                const isExpanded = expandedPets[group.petId] ?? true
+                const isExpanded = Boolean(expandedPets[group.petId])
                 const allDone = group.completedCount === group.totalCount && group.totalCount > 0
 
                 return (

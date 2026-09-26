@@ -45,53 +45,55 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
       .eq('user_id', user!.id)
       .maybeSingle()
 
-    if (!memberData) {
-      // Check if this user's email has a pending invitation to join an existing family
+    let activeFamilyId = memberData?.family_id
+
+    if (!activeFamilyId) {
       const userEmail = user!.email?.toLowerCase()
       if (userEmail) {
-        const { data: pendingInvite } = await supabase
-          .from('family_invites')
+        // Check if there is already a family_members entry by email
+        const { data: emailMember } = await supabase
+          .from('family_members')
           .select('family_id, id')
           .eq('email', userEmail)
-          .order('created_at', { ascending: false })
-          .limit(1)
           .maybeSingle()
 
-        if (pendingInvite?.family_id) {
-          // Join the inviting family
-          await supabase.from('family_members').insert({
-            family_id: pendingInvite.family_id,
-            user_id: user!.id,
-            email: userEmail,
-            role: 'member',
-          })
-
+        if (emailMember) {
           await supabase
+            .from('family_members')
+            .update({ user_id: user!.id })
+            .eq('id', emailMember.id)
+          activeFamilyId = emailMember.family_id
+        } else {
+          // Check if this user's email has a pending invitation to join an existing family
+          const { data: pendingInvite } = await supabase
             .from('family_invites')
-            .update({ status: 'accepted' })
-            .eq('id', pendingInvite.id)
-
-          // Load data from the joined family
-          const { data: famData } = await supabase
-            .from('families')
-            .select('*')
-            .eq('id', pendingInvite.family_id)
+            .select('family_id, id')
+            .eq('email', userEmail)
+            .order('created_at', { ascending: false })
+            .limit(1)
             .maybeSingle()
 
-          const { data: memData } = await supabase
-            .from('family_members')
-            .select('*')
-            .eq('family_id', pendingInvite.family_id)
-            .order('joined_at', { ascending: true })
+          if (pendingInvite?.family_id) {
+            // Join the inviting family
+            await supabase.from('family_members').insert({
+              family_id: pendingInvite.family_id,
+              user_id: user!.id,
+              email: userEmail,
+              role: 'member',
+            })
 
-          setFamily(famData as Family | null)
-          setMembers((memData as FamilyMember[]) ?? [])
-          setInvites([])
-          setLoading(false)
-          return
+            await supabase
+              .from('family_invites')
+              .update({ status: 'accepted' })
+              .eq('id', pendingInvite.id)
+
+            activeFamilyId = pendingInvite.family_id
+          }
         }
       }
+    }
 
+    if (!activeFamilyId) {
       // No invite found: auto-create default family
       await autoCreateDefaultFamily()
       return
@@ -100,7 +102,7 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
     const { data: famData } = await supabase
       .from('families')
       .select('*')
-      .eq('id', memberData.family_id)
+      .eq('id', activeFamilyId)
       .maybeSingle()
 
     if (!famData) {
@@ -111,19 +113,19 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
     const { data: memData } = await supabase
       .from('family_members')
       .select('*')
-      .eq('family_id', memberData.family_id)
+      .eq('family_id', activeFamilyId)
       .order('joined_at', { ascending: true })
 
     const { data: invData } = await supabase
       .from('family_invites')
       .select('*')
-      .eq('family_id', memberData.family_id)
+      .eq('family_id', activeFamilyId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
 
     setFamily(famData as Family | null)
-    setMembers(memData as FamilyMember[] ?? [])
-    setInvites(invData as FamilyInvite[] ?? [])
+    setMembers((memData as FamilyMember[]) ?? [])
+    setInvites((invData as FamilyInvite[]) ?? [])
     setLoading(false)
   }
 
