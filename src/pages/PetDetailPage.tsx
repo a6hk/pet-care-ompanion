@@ -5,12 +5,13 @@ import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, Plus, Trash2, CheckCircle2, Circle, Clock, Syringe, Stethoscope, Scissors,
-  Calendar as CalIcon, PawPrint, Edit2, Sparkles, FileText, X,
+  Calendar as CalIcon, PawPrint, Edit2, Sparkles, FileText, X, AlertTriangle, Loader2
 } from 'lucide-react'
 import { Modal } from '@/components/Modal'
 import { EmptyState } from '@/components/EmptyState'
 import { calculateAge, formatTime, formatDate, speciesIcon, cn } from '@/lib/utils'
 import { parseVetInstructionsToTasks, generateDefaultPetRoutine } from '@/lib/aiChecklistParser'
+import { PetFormModalContent, type PetFormData } from '@/components/PetFormModalContent'
 import type { Pet, Checklist, ChecklistItem, Routine, Appointment, Vaccination } from '@/types'
 
 type Tab = 'overview' | 'checklists' | 'routines' | 'appointments' | 'vaccinations'
@@ -23,6 +24,13 @@ export function PetDetailPage() {
   const [pet, setPet] = useState<Pet | null>(null)
   const [tab, setTab] = useState<Tab>('overview')
   const [loading, setLoading] = useState(true)
+
+  // Pet Edit & Delete states
+  const [showEditPet, setShowEditPet] = useState(false)
+  const [isUpdatingPet, setIsUpdatingPet] = useState(false)
+  const [showDeletePetModal, setShowDeletePetModal] = useState(false)
+  const [isDeletingPet, setIsDeletingPet] = useState(false)
+  const [deletePetError, setDeletePetError] = useState<string | null>(null)
 
   // Checklist state
   const [checklists, setChecklists] = useState<Checklist[]>([])
@@ -95,6 +103,75 @@ export function PetDetailPage() {
   }, [petId, family])
 
   useEffect(() => { loadAll() }, [loadAll])
+
+  // ===== Pet Edit & Delete handlers =====
+  async function handleEditPet(formData: PetFormData): Promise<{ error: string | null }> {
+    if (!pet || !family || !user) return { error: 'Not authenticated' }
+    setIsUpdatingPet(true)
+
+    const { error: updateError } = await supabase
+      .from('pets')
+      .update({
+        name: formData.name.trim(),
+        species: formData.species,
+        breed: formData.breed?.trim() || null,
+        date_of_birth: formData.date_of_birth || null,
+        weight: formData.weight ? parseFloat(formData.weight) : null,
+        photo_url: formData.photo_url || null,
+        likes: formData.likes?.trim() || null,
+        dislikes: formData.dislikes?.trim() || null,
+        notes: formData.notes?.trim() || null,
+      })
+      .eq('id', pet.id)
+
+    setIsUpdatingPet(false)
+
+    if (updateError) {
+      return { error: updateError.message }
+    }
+
+    await supabase.from('activity_log').insert({
+      family_id: family.id,
+      pet_id: pet.id,
+      user_id: user.id,
+      user_email: user.email!,
+      action: 'updated_pet',
+      details: `Updated details for ${formData.name}`,
+    })
+
+    setShowEditPet(false)
+    loadAll()
+    return { error: null }
+  }
+
+  async function handleDeletePet() {
+    if (!pet || !family || !user) return
+    setIsDeletingPet(true)
+    setDeletePetError(null)
+
+    const { error: delError } = await supabase
+      .from('pets')
+      .delete()
+      .eq('id', pet.id)
+
+    setIsDeletingPet(false)
+
+    if (delError) {
+      setDeletePetError(delError.message)
+      return
+    }
+
+    await supabase.from('activity_log').insert({
+      family_id: family.id,
+      user_id: user.id,
+      user_email: user.email!,
+      action: 'deleted_pet',
+      details: `Removed pet profile "${pet.name}"`,
+    })
+
+    setShowDeletePetModal(false)
+    navigate('/app/pets', { replace: true })
+  }
 
   // ===== Checklist handlers =====
   async function toggleItem(item: ChecklistItem, cl: Checklist) {
@@ -365,20 +442,44 @@ export function PetDetailPage() {
       </Link>
 
       {/* Pet header */}
-      <div className="card p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-        {pet.photo_url ? (
-          <img src={pet.photo_url} alt={pet.name} className="w-20 h-20 rounded-2xl object-cover" />
-        ) : (
-          <div className="w-20 h-20 rounded-2xl bg-primary-50 flex items-center justify-center text-4xl">{speciesIcon(pet.species)}</div>
-        )}
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-gray-900">{pet.name}</h1>
-          <div className="flex flex-wrap gap-3 mt-1 text-sm text-gray-500">
-            <span>{pet.breed || pet.species}</span>
-            <span>•</span>
-            <span>{calculateAge(pet.date_of_birth)}</span>
-            {pet.weight && <><span>•</span><span>{pet.weight} kg</span></>}
+      <div className="card p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-4">
+          {pet.photo_url ? (
+            <img src={pet.photo_url} alt={pet.name} className="w-20 h-20 rounded-2xl object-cover border border-gray-100 shadow-sm" />
+          ) : (
+            <div className="w-20 h-20 rounded-2xl bg-primary-50 flex items-center justify-center text-4xl">{speciesIcon(pet.species)}</div>
+          )}
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{pet.name}</h1>
+            <div className="flex flex-wrap gap-3 mt-1 text-sm text-gray-500">
+              <span>{pet.breed || pet.species}</span>
+              <span>•</span>
+              <span>{calculateAge(pet.date_of_birth)}</span>
+              {pet.weight && <><span>•</span><span>{pet.weight} kg</span></>}
+            </div>
           </div>
+        </div>
+
+        {/* Edit and Delete Actions */}
+        <div className="flex items-center gap-2 self-end sm:self-center">
+          <button
+            onClick={() => setShowEditPet(true)}
+            className="btn-secondary text-sm py-2 px-3.5 flex items-center gap-1.5"
+            title="Edit Pet Details"
+          >
+            <Edit2 className="w-4 h-4 text-gray-600" />
+            <span>Edit Pet</span>
+          </button>
+          <button
+            onClick={() => {
+              setDeletePetError(null)
+              setShowDeletePetModal(true)
+            }}
+            className="p-2 rounded-xl text-gray-400 hover:text-error-600 hover:bg-error-50 border border-transparent hover:border-error-200 transition-colors"
+            title="Delete Pet Profile"
+          >
+            <Trash2 className="w-5 h-5" />
+          </button>
         </div>
       </div>
 
@@ -1032,6 +1133,67 @@ export function PetDetailPage() {
             <textarea value={vaxForm.notes} onChange={(e) => setVaxForm({ ...vaxForm, notes: e.target.value })} className="input" rows={2} />
           </div>
           <button onClick={addVaccination} disabled={!vaxForm.vaccine_name || !vaxForm.date_given} className="btn-primary w-full">Add record</button>
+        </div>
+      </Modal>
+
+      {/* ===== Edit Pet Modal ===== */}
+      <Modal open={showEditPet} onClose={() => setShowEditPet(false)} title={`Edit ${pet.name}'s Profile`} size="lg">
+        <PetFormModalContent
+          initialData={pet}
+          onSubmit={handleEditPet}
+          onCancel={() => setShowEditPet(false)}
+          isSubmitting={isUpdatingPet}
+          submitLabel="Save Changes"
+        />
+      </Modal>
+
+      {/* ===== Delete Pet Confirmation Modal ===== */}
+      <Modal open={showDeletePetModal} onClose={() => setShowDeletePetModal(false)} title="Delete Pet Profile" size="sm">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-error-50 text-error-800 rounded-xl">
+            <AlertTriangle className="w-5 h-5 text-error-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold text-error-900">Are you sure you want to delete {pet.name}?</p>
+              <p className="mt-1 text-xs text-error-700">
+                This will permanently delete {pet.name}'s profile and associated checklists, routines, appointments, and vaccination history. This action cannot be undone.
+              </p>
+            </div>
+          </div>
+
+          {deletePetError && (
+            <div className="text-sm text-error-600 bg-error-50 rounded-lg px-4 py-3">
+              {deletePetError}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowDeletePetModal(false)}
+              disabled={isDeletingPet}
+              className="btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleDeletePet}
+              disabled={isDeletingPet}
+              className="btn-danger flex items-center gap-2"
+            >
+              {isDeletingPet ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  Delete {pet.name}
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </Modal>
     </div>
