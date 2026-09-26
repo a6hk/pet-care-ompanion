@@ -68,7 +68,7 @@ Deno.serve(async (req: Request) => {
         'X-Title': 'PetPal',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-4o-mini',
+        model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -99,7 +99,9 @@ Deno.serve(async (req: Request) => {
 
     let parsed: { title?: string; items?: ChecklistItem[] }
     try {
-      parsed = JSON.parse(content)
+      // Strip markdown code fences if returned by the model
+      const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+      parsed = JSON.parse(cleaned)
     } catch {
       return new Response(
         JSON.stringify({ error: 'AI returned an invalid response. Please try again.' }),
