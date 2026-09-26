@@ -187,13 +187,13 @@ export function FeedbackPage() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify({
-              _subject: `[PetPal Feedback - ${type.toUpperCase()}] ${summary.trim()}`,
+              _subject: `[PawCare Feedback - ${type.toUpperCase()}] ${summary.trim()}`,
               ticket_id: ticketId,
               category: type,
               summary: summary.trim(),
               details: details.trim(),
               user_name: profile?.full_name || 'Member',
-              user_email: user?.email || profile?.email || 'user@petpal.app',
+              user_email: user?.email || profile?.email || 'user@pawcare.app',
               family_name: family?.name || 'N/A',
               screenshot_url: finalImageUrl || 'None',
               to_email: targetFeedbackEmail,
@@ -308,7 +308,7 @@ export function FeedbackPage() {
       bgColor: 'bg-primary-50',
       borderColor: 'border-primary-200',
       placeholderSummary: 'e.g. The new calendar and daily care checklist make pet care so easy!',
-      placeholderDetails: 'Share your thoughts, praise, or overall experience with PetPal...',
+      placeholderDetails: 'Share your thoughts, praise, or overall experience with PawCare...',
     },
   ]
 
@@ -321,9 +321,9 @@ export function FeedbackPage() {
 
   const mailtoUrl = successTicket
     ? `mailto:${targetFeedbackEmail}?subject=${encodeURIComponent(
-        `[PetPal ${successTicket.type.toUpperCase()}] ${successTicket.summary} (Ticket #${successTicket.id})`
+        `[PawCare ${successTicket.type.toUpperCase()}] ${successTicket.summary} (Ticket #${successTicket.id})`
       )}&body=${encodeURIComponent(
-        `Hello PetPal Team,\n\nI have submitted feedback regarding PetPal:\n\nTicket ID: #${successTicket.id}\nCategory: ${successTicket.type}\nSummary: ${successTicket.summary}\nDetails: ${successTicket.details}\nUser: ${profile?.full_name || 'Member'} (${user?.email})\nFamily: ${family?.name || 'N/A'}\n\nSent from PetPal Web App`
+        `Hello PawCare Team,\n\nI have submitted feedback regarding PawCare:\n\nTicket ID: #${successTicket.id}\nCategory: ${successTicket.type}\nSummary: ${successTicket.summary}\nDetails: ${successTicket.details}\nUser: ${profile?.full_name || 'Member'} (${user?.email})\nFamily: ${family?.name || 'N/A'}\n\nSent from PawCare Web App`
       )}`
     : ''
 
@@ -339,7 +339,7 @@ export function FeedbackPage() {
             </span>
           </div>
           <p className="text-sm text-gray-500 mt-1">
-            We value your feedback. Let us know how we can make PetPal even better for your family.
+            We value your feedback. Let us know how we can make PawCare even better for your family.
           </p>
         </div>
 
@@ -708,7 +708,7 @@ export function FeedbackPage() {
               <div className="p-3 bg-gray-50 rounded-xl space-y-1.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-gray-500">Name:</span>
-                  <span className="font-semibold text-gray-900">{profile?.full_name || 'PetPal Member'}</span>
+                  <span className="font-semibold text-gray-900">{profile?.full_name || 'PawCare Member'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Email:</span>

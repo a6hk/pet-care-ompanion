@@ -64,7 +64,7 @@ export function FamilyPage() {
 
   function handleCopyFamilyCode() {
     if (!family) return
-    const textToCopy = `Join our PetPal family "${family.name}" to coordinate pet care together! Visit: ${window.location.origin}/login`
+    const textToCopy = `Join our PawCare family "${family.name}" to coordinate pet care together! Visit: ${window.location.origin}/login`
     navigator.clipboard.writeText(textToCopy)
     setCopiedCode(true)
     setTimeout(() => setCopiedCode(false), 2500)
@@ -75,8 +75,8 @@ export function FamilyPage() {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `Join ${family.name} on PetPal`,
-          text: `Join our family on PetPal to coordinate daily walks, feeding, and vet visits!`,
+          title: `Join ${family.name} on PawCare`,
+          text: `Join our family on PawCare to coordinate daily walks, feeding, and vet visits!`,
           url: `${window.location.origin}/login`,
         })
       } catch {}

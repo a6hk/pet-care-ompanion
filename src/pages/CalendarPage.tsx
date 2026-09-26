@@ -180,7 +180,7 @@ export function CalendarPage() {
     const endIso = `${dateClean}T${String(parseInt(timeClean) + 100).padStart(4, '0')}00`
 
     const title = `${event.title} (${event.pet_name})`
-    const details = `${event.notes || 'Pet care appointment via PetPal'}\nPet: ${event.pet_name}`
+    const details = `${event.notes || 'Pet care appointment via PawCare'}\nPet: ${event.pet_name}`
     const location = event.location || ''
 
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(

@@ -583,7 +583,7 @@ export function DashboardPage() {
             </h1>
             <p className="text-sm sm:text-base text-primary-100/90 leading-relaxed">
               {stats.total === 0 ? (
-                'Welcome to PetPal! Add your pets and setup daily feeding or routines to start tracking care.'
+                'Welcome to PawCare! Add your pets and setup daily feeding or routines to start tracking care.'
               ) : stats.completed === stats.total ? (
                 'All caught up! 🎉 Your family completed all pet care tasks for today.'
               ) : (

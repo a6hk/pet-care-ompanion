@@ -400,12 +400,12 @@ Positive reinforcement training builds an unbreakable bond and a calm, well-mann
   // 6. DEFAULT GENERAL CONSULTATION
   const petSummary = selectedPet
     ? `I'm analyzing your request for **${selectedPet.name}**, your ${selectedPet.breed || selectedPet.species}.`
-    : `I'm PetPal's Certified AI Pet Care Consultant.`
+    : `I'm PawCare's Certified AI Pet Care Consultant.`
 
   return {
     category: 'general',
     isEmergency: false,
-    content: `🐾 **PetPal AI Pet Care Consultant**
+    content: `🐾 **PawCare AI Pet Care Consultant**
 
 ${petSummary} How can I assist you with your pet care today?
 

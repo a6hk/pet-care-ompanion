@@ -346,7 +346,7 @@ export async function getGeminiConsultantChat(
     payload?: string
   }>
 }> {
-  const systemInstruction = `You are PetPal's Certified AI Pet Care Consultant.
+  const systemInstruction = `You are PawCare's Certified AI Pet Care Consultant.
 You are an expert companion animal specialist, veterinary nurse consultant, and animal behaviorist.
 You provide compassionate, accurate, veterinary-grounded advice for pet owners.
 

@@ -58,8 +58,8 @@ export function FamilySetupPage() {
         </form>
 
         <div className="mt-6 flex items-center justify-center gap-2 text-xs text-gray-400">
-          <PawPrint className="w-4 h-4" />
-          <span>PetPal — Family Pet Care Manager</span>
+          <img src="/favicon.png" alt="PawCare" className="w-4 h-4 rounded-full" />
+          <span>PawCare — Family Pet Care Manager</span>
         </div>
       </div>
     </div>

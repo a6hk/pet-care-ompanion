@@ -448,7 +448,7 @@ Choose one of your registered pets above to get personalized advice, or click an
         </form>
 
         <p className="text-[10px] text-center text-gray-400 leading-tight">
-          ⚡ Powered by Google Gemini 2.5 Flash • ⚠️ <strong>Veterinary Disclaimer:</strong> PetPal AI Consultant provides educational animal care guidance. For severe distress, suspected poisoning, or medical emergencies, consult a licensed veterinarian or emergency clinic immediately.
+          ⚡ Powered by Google Gemini AI • ⚠️ <strong>Veterinary Disclaimer:</strong> PawCare AI Consultant provides educational animal care guidance. For severe distress, suspected poisoning, or medical emergencies, consult a licensed veterinarian or emergency clinic immediately.
         </p>
       </div>
 
@@ -463,9 +463,9 @@ Choose one of your registered pets above to get personalized advice, or click an
           <div className="p-3.5 rounded-2xl bg-purple-50 border border-purple-100 flex items-start gap-3">
             <Sparkles className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
             <div className="text-xs text-purple-900 space-y-1">
-              <p className="font-bold">Powered by Gemini 2.5 Flash</p>
+              <p className="font-bold">Powered by Google Gemini AI</p>
               <p className="text-purple-700 leading-relaxed">
-                Connect your Google Gemini API key to enable high-speed veterinary triage, custom checklists, and conversational consultations across all of PetPal.
+                Connect your Google Gemini API key to enable high-speed veterinary triage, custom checklists, and conversational consultations across all of PawCare.
               </p>
             </div>
           </div>
