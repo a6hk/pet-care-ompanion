@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useFamily } from '@/context/FamilyContext'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Circle, Plus, PawPrint, Activity, TrendingUp, Calendar as CalIcon } from 'lucide-react'
+import { CheckCircle2, Circle, Plus, PawPrint, Activity, TrendingUp, Calendar as CalIcon, ChevronDown, ChevronUp } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { formatTime, relativeTime, speciesIcon } from '@/lib/utils'
 import type { Pet, ChecklistItem, Checklist, ActivityLog } from '@/types'
@@ -23,6 +23,63 @@ export function DashboardPage() {
   const [activity, setActivity] = useState<ActivityLog[]>([])
   const [stats, setStats] = useState<{ total: number; completed: number }>({ total: 0, completed: 0 })
   const [loading, setLoading] = useState(true)
+  const [expandedPets, setExpandedPets] = useState<Record<string, boolean>>({})
+
+  const togglePetExpanded = (petId: string) => {
+    setExpandedPets((prev) => ({
+      ...prev,
+      [petId]: prev[petId] !== undefined ? !prev[petId] : false, // defaults to true initially
+    }))
+  }
+
+  const setAllExpanded = (expand: boolean) => {
+    const updated: Record<string, boolean> = {}
+    groupedPets.forEach((g) => {
+      updated[g.petId] = expand
+    })
+    setExpandedPets(updated)
+  }
+
+  const groupedPets = useMemo(() => {
+    const petMap = new Map(pets.map((p) => [p.id, p]))
+    const groupMap = new Map<
+      string,
+      {
+        petId: string
+        petName: string
+        species: string
+        petPhoto: string | null
+        tasks: TodaysTask[]
+        completedCount: number
+        totalCount: number
+      }
+    >()
+
+    // Initialize groups for pets that have tasks
+    for (const task of tasks) {
+      const pid = task.pet_id || 'unknown'
+      if (!groupMap.has(pid)) {
+        const pet = petMap.get(pid)
+        groupMap.set(pid, {
+          petId: pid,
+          petName: pet?.name || task.pet_name || 'Pet',
+          species: pet?.species || task.species || '',
+          petPhoto: pet?.photo_url || null,
+          tasks: [],
+          completedCount: 0,
+          totalCount: 0,
+        })
+      }
+      const group = groupMap.get(pid)!
+      group.tasks.push(task)
+      group.totalCount += 1
+      if (task.completed) {
+        group.completedCount += 1
+      }
+    }
+
+    return Array.from(groupMap.values())
+  }, [pets, tasks])
 
   const loadData = useCallback(async () => {
     if (!family) return
@@ -309,9 +366,25 @@ export function DashboardPage() {
         <div className="lg:col-span-2 card p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-gray-900">Today's tasks</h2>
-            <Link to="/app/checklists" className="text-xs text-primary-600 font-medium hover:underline">
-              View all checklists
-            </Link>
+            <div className="flex items-center gap-3">
+              {groupedPets.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const anyCollapsed = groupedPets.some((g) => (expandedPets[g.petId] ?? true) === false)
+                    setAllExpanded(anyCollapsed)
+                  }}
+                  className="text-xs text-gray-500 hover:text-gray-800 font-medium transition-colors"
+                >
+                  {groupedPets.some((g) => (expandedPets[g.petId] ?? true) === false)
+                    ? 'Expand all'
+                    : 'Collapse all'}
+                </button>
+              )}
+              <Link to="/app/checklists" className="text-xs text-primary-600 font-medium hover:underline">
+                View all checklists
+              </Link>
+            </div>
           </div>
 
           {tasks.length === 0 ? (
@@ -327,29 +400,110 @@ export function DashboardPage() {
               }
             />
           ) : (
-            <div className="space-y-2">
-              {tasks.map((task) => (
-                <button
-                  key={task.id}
-                  onClick={() => toggleTask(task)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 transition-colors text-left group"
-                >
-                  {task.completed ? (
-                    <CheckCircle2 className="w-5 h-5 text-success-500 flex-shrink-0 animate-check-pop" />
-                  ) : (
-                    <Circle className="w-5 h-5 text-gray-300 flex-shrink-0 group-hover:text-primary-400 transition-colors" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium ${task.completed ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
-                      {task.title}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {speciesIcon(task.species)} {task.pet_name}
-                      {task.due_time ? ` • ${formatTime(task.due_time)}` : ''}
-                    </p>
+            <div className="space-y-3">
+              {groupedPets.map((group) => {
+                const isExpanded = expandedPets[group.petId] ?? true
+                const allDone = group.completedCount === group.totalCount && group.totalCount > 0
+
+                return (
+                  <div
+                    key={group.petId}
+                    className="border border-gray-100 rounded-2xl bg-white overflow-hidden shadow-xs transition-all hover:border-gray-200"
+                  >
+                    {/* Pet Accordion Header */}
+                    <button
+                      type="button"
+                      onClick={() => togglePetExpanded(group.petId)}
+                      className="w-full flex items-center justify-between p-3.5 hover:bg-gray-50/80 transition-colors text-left"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        {group.petPhoto ? (
+                          <img
+                            src={group.petPhoto}
+                            alt={group.petName}
+                            className="w-9 h-9 rounded-xl object-cover ring-1 ring-gray-200/60"
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center text-lg flex-shrink-0">
+                            {speciesIcon(group.species)}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-gray-900 text-sm truncate">
+                              {group.petName}
+                            </span>
+                            <span className="text-xs text-gray-400 capitalize hidden sm:inline">
+                              {group.species}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            {group.totalCount === 1 ? '1 task' : `${group.totalCount} tasks`} scheduled
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2.5 flex-shrink-0">
+                        {/* Summary badge */}
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
+                            allDone
+                              ? 'bg-success-50 text-success-700 border border-success-200/60'
+                              : 'bg-primary-50 text-primary-700 border border-primary-200/60'
+                          }`}
+                        >
+                          {allDone ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-success-600" />
+                          ) : null}
+                          {group.completedCount}/{group.totalCount} done
+                        </span>
+
+                        {/* Chevron */}
+                        <div className="p-1 rounded-lg text-gray-400 hover:text-gray-600">
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4 transition-transform duration-200" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4 transition-transform duration-200" />
+                          )}
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Collapsible Tasks List */}
+                    {isExpanded && (
+                      <div className="border-t border-gray-50 bg-gray-50/30 px-2 py-2 space-y-1">
+                        {group.tasks.map((task) => (
+                          <button
+                            key={task.id}
+                            type="button"
+                            onClick={() => toggleTask(task)}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white transition-all text-left group"
+                          >
+                            {task.completed ? (
+                              <CheckCircle2 className="w-5 h-5 text-success-500 flex-shrink-0 animate-check-pop" />
+                            ) : (
+                              <Circle className="w-5 h-5 text-gray-300 flex-shrink-0 group-hover:text-primary-400 transition-colors" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p
+                                className={`text-sm font-medium ${
+                                  task.completed ? 'text-gray-400 line-through' : 'text-gray-900'
+                                }`}
+                              >
+                                {task.title}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {task.checklist_title}
+                                {task.due_time ? ` • ${formatTime(task.due_time)}` : ''}
+                              </p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </button>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
