@@ -3,6 +3,8 @@ import { useAuth } from '@/context/AuthContext'
 import { useFamily } from '@/context/FamilyContext'
 import { FullPageLoader } from '@/components/LoadingSpinner'
 import { AppShell } from '@/components/AppShell'
+import { ConfigBanner } from '@/components/ConfigBanner'
+import { isSupabaseConfigured } from '@/lib/supabase'
 import { FamilySetupPage } from '@/pages/FamilySetupPage'
 import { SignUpPage } from '@/pages/auth/SignUpPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
@@ -29,16 +31,19 @@ export default function App() {
   if (loading) return <FullPageLoader />
 
   return (
-    <Routes>
-      <Route path="/signup" element={session ? <Navigate to="/app" replace /> : <SignUpPage />} />
-      <Route path="/login" element={session ? <Navigate to="/app" replace /> : <LoginPage />} />
-      <Route path="/app" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-      <Route path="/app/pets" element={<ProtectedRoute><PetsPage /></ProtectedRoute>} />
-      <Route path="/app/pets/:petId" element={<ProtectedRoute><PetDetailPage /></ProtectedRoute>} />
-      <Route path="/app/checklists" element={<ProtectedRoute><ChecklistsPage /></ProtectedRoute>} />
-      <Route path="/app/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
-      <Route path="/app/family" element={<ProtectedRoute><FamilyPage /></ProtectedRoute>} />
-      <Route path="*" element={<Navigate to="/app" replace />} />
-    </Routes>
+    <>
+      {!isSupabaseConfigured && <ConfigBanner />}
+      <Routes>
+        <Route path="/signup" element={session ? <Navigate to="/app" replace /> : <SignUpPage />} />
+        <Route path="/login" element={session ? <Navigate to="/app" replace /> : <LoginPage />} />
+        <Route path="/app" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+        <Route path="/app/pets" element={<ProtectedRoute><PetsPage /></ProtectedRoute>} />
+        <Route path="/app/pets/:petId" element={<ProtectedRoute><PetDetailPage /></ProtectedRoute>} />
+        <Route path="/app/checklists" element={<ProtectedRoute><ChecklistsPage /></ProtectedRoute>} />
+        <Route path="/app/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
+        <Route path="/app/family" element={<ProtectedRoute><FamilyPage /></ProtectedRoute>} />
+        <Route path="*" element={<Navigate to="/app" replace />} />
+      </Routes>
+    </>
   )
 }

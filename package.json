@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "supabase:start": "DOCKER_DEFAULT_PLATFORM=linux/arm64 npx supabase start",
+    "supabase:stop": "npx supabase stop",
+    "supabase:status": "npx supabase status"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

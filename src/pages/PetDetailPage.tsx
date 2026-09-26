@@ -10,6 +10,7 @@ import {
 import { Modal } from '@/components/Modal'
 import { EmptyState } from '@/components/EmptyState'
 import { calculateAge, formatTime, formatDate, speciesIcon, cn } from '@/lib/utils'
+import { parseVetInstructionsToTasks, generateDefaultPetRoutine } from '@/lib/aiChecklistParser'
 import type { Pet, Checklist, ChecklistItem, Routine, Appointment, Vaccination } from '@/types'
 
 type Tab = 'overview' | 'checklists' | 'routines' | 'appointments' | 'vaccinations'
@@ -36,10 +37,14 @@ export function PetDetailPage() {
   const [checklistType, setChecklistType] = useState<'recurring' | 'time_limited'>('recurring')
   const [checklistDuration, setChecklistDuration] = useState('7')
 
-  // Routine state
+  // Routine multi-slot state
   const [routines, setRoutines] = useState<Routine[]>([])
   const [showAddRoutine, setShowAddRoutine] = useState(false)
-  const [routineForm, setRoutineForm] = useState({ type: 'feeding' as 'feeding' | 'walking', time: '08:00', portion: '', notes: '' })
+  const [routineType, setRoutineType] = useState<'feeding' | 'walking'>('feeding')
+  const [routineSlots, setRoutineSlots] = useState<{ label: string; time: string; portion: string; notes: string }[]>([
+    { label: 'Breakfast', time: '08:00', portion: '1 cup', notes: '' },
+    { label: 'Dinner', time: '18:00', portion: '1 cup', notes: '' },
+  ])
 
   // Appointment state
   const [appointments, setAppointments] = useState<Appointment[]>([])
@@ -128,44 +133,58 @@ export function PetDetailPage() {
     setError(null)
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-checklist`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({
-          type,
-          petName: pet.name,
-          species: pet.species,
-          breed: pet.breed,
-          instructions: aiInput || undefined,
-        }),
-      })
+      let result: { title: string; items: { title: string; due_time: string | null }[] } | null = null
 
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}))
-        throw new Error(errBody.error || `Request failed (${response.status})`)
+      // 1. Try calling the Supabase Edge Function if available
+      try {
+        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-checklist`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({
+            type,
+            petName: pet.name,
+            species: pet.species,
+            breed: pet.breed,
+            instructions: aiInput || undefined,
+          }),
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+            result = {
+              title: data.title || (type === 'routine' ? `${pet.name}'s Daily Care` : `${pet.name}'s Vet Instructions`),
+              items: data.items.map((item: { title?: string; due_time?: string | null }) => ({
+                title: item.title || '',
+                due_time: item.due_time || null,
+              })),
+            }
+          }
+        } else {
+          console.warn(`Edge function returned ${response.status}. Using smart client-side parser fallback.`)
+        }
+      } catch (networkOrFuncErr) {
+        console.warn('Edge function unavailable, using client-side smart parser:', networkOrFuncErr)
       }
 
-      const data = await response.json()
-      if (!data.items || !Array.isArray(data.items)) {
-        throw new Error('Invalid AI response format')
+      // 2. If edge function was not deployed or returned no result, use the smart built-in analyzer
+      if (!result) {
+        if (type === 'vet') {
+          result = parseVetInstructionsToTasks(aiInput, pet.name, pet.species)
+        } else {
+          result = generateDefaultPetRoutine(pet.name, pet.species, pet.breed || undefined)
+        }
       }
 
-      const result = {
-        title: data.title || (type === 'routine' ? `${pet.name}'s Daily Care` : 'Vet Instructions'),
-        items: data.items.map((item: { title?: string; due_time?: string | null }) => ({
-          title: item.title || '',
-          due_time: item.due_time || null,
-        })),
-      }
       setAiResult(result)
       setEditingItems(result.items)
       setChecklistTitle(result.title)
       setChecklistType(type === 'routine' ? 'recurring' : 'time_limited')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate checklist. Make sure the AI API key is configured.')
+      setError(err instanceof Error ? err.message : 'Failed to generate checklist.')
     } finally {
       setAiLoading(false)
     }
@@ -231,18 +250,41 @@ export function PetDetailPage() {
   }
 
   // ===== Routine handlers =====
-  async function addRoutine() {
-    if (!pet || !family) return
-    await supabase.from('routines').insert({
-      pet_id: pet.id,
-      family_id: family.id,
-      type: routineForm.type,
-      time: routineForm.time,
-      portion: routineForm.portion || null,
-      notes: routineForm.notes || null,
+  function switchRoutineType(type: 'feeding' | 'walking') {
+    setRoutineType(type)
+    if (type === 'feeding') {
+      setRoutineSlots([
+        { label: 'Breakfast', time: '08:00', portion: '1 cup', notes: '' },
+        { label: 'Dinner', time: '18:00', portion: '1 cup', notes: '' },
+      ])
+    } else {
+      setRoutineSlots([
+        { label: 'Morning walk', time: '07:30', portion: '', notes: '20 mins' },
+        { label: 'Evening walk', time: '18:30', portion: '', notes: '30 mins' },
+      ])
+    }
+  }
+
+  async function addRoutinesBatch() {
+    if (!pet || !family || routineSlots.length === 0) return
+    const validSlots = routineSlots.filter((s) => s.time)
+    if (validSlots.length === 0) return
+
+    const rows = validSlots.map((s) => {
+      const combinedNotes = [s.label, s.notes].filter(Boolean).join(' • ')
+      return {
+        pet_id: pet.id,
+        family_id: family.id,
+        type: routineType,
+        time: s.time,
+        portion: routineType === 'feeding' ? (s.portion || null) : null,
+        notes: combinedNotes || null,
+      }
     })
+
+    await supabase.from('routines').insert(rows)
     setShowAddRoutine(false)
-    setRoutineForm({ type: 'feeding', time: '08:00', portion: '', notes: '' })
+    switchRoutineType('feeding')
     loadAll()
   }
 
@@ -731,33 +773,202 @@ export function PetDetailPage() {
         </div>
       </Modal>
 
-      {/* ===== Routine Modal ===== */}
-      <Modal open={showAddRoutine} onClose={() => setShowAddRoutine(false)} title="Add routine">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Type</label>
-              <select value={routineForm.type} onChange={(e) => setRoutineForm({ ...routineForm, type: e.target.value as 'feeding' | 'walking' })} className="input">
-                <option value="feeding">Feeding</option>
-                <option value="walking">Walking</option>
-              </select>
-            </div>
-            <div>
-              <label className="label">Time</label>
-              <input type="time" value={routineForm.time} onChange={(e) => setRoutineForm({ ...routineForm, time: e.target.value })} className="input" />
-            </div>
-          </div>
-          {routineForm.type === 'feeding' && (
-            <div>
-              <label className="label">Portion</label>
-              <input value={routineForm.portion} onChange={(e) => setRoutineForm({ ...routineForm, portion: e.target.value })} className="input" placeholder="e.g. 1 cup dry food" />
-            </div>
-          )}
+      {/* ===== Routine Multi-Slot Modal ===== */}
+      <Modal open={showAddRoutine} onClose={() => setShowAddRoutine(false)} title="Setup daily routine" size="lg">
+        <div className="space-y-5">
+          {/* Routine Type Selector */}
           <div>
-            <label className="label">Notes</label>
-            <textarea value={routineForm.notes} onChange={(e) => setRoutineForm({ ...routineForm, notes: e.target.value })} className="input" rows={2} />
+            <label className="label">Activity type</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => switchRoutineType('feeding')}
+                className={cn(
+                  'flex items-center justify-center gap-2 p-3 rounded-xl border text-sm font-semibold transition-all',
+                  routineType === 'feeding'
+                    ? 'border-primary-500 bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-500'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                )}
+              >
+                <span className="text-lg">🍽️</span> Feeding
+              </button>
+              <button
+                type="button"
+                onClick={() => switchRoutineType('walking')}
+                className={cn(
+                  'flex items-center justify-center gap-2 p-3 rounded-xl border text-sm font-semibold transition-all',
+                  routineType === 'walking'
+                    ? 'border-secondary-500 bg-secondary-50 text-secondary-700 shadow-sm ring-1 ring-secondary-500'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                )}
+              >
+                <span className="text-lg">🦮</span> Walking
+              </button>
+            </div>
           </div>
-          <button onClick={addRoutine} className="btn-primary w-full">Add routine</button>
+
+          {/* Quick preset buttons */}
+          <div>
+            <label className="label">Quick presets</label>
+            <div className="flex flex-wrap gap-2">
+              {routineType === 'feeding' ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setRoutineSlots([
+                      { label: 'Breakfast', time: '08:00', portion: '1 cup', notes: '' },
+                      { label: 'Dinner', time: '18:00', portion: '1 cup', notes: '' },
+                    ])}
+                    className="btn-secondary text-xs py-1.5 px-3"
+                  >
+                    2x Daily (Breakfast, Dinner)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRoutineSlots([
+                      { label: 'Breakfast', time: '08:00', portion: '3/4 cup', notes: '' },
+                      { label: 'Lunch', time: '13:00', portion: '1/2 cup', notes: '' },
+                      { label: 'Dinner', time: '19:00', portion: '3/4 cup', notes: '' },
+                    ])}
+                    className="btn-secondary text-xs py-1.5 px-3"
+                  >
+                    3x Daily (Breakfast, Lunch, Dinner)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRoutineSlots([
+                      { label: 'Breakfast', time: '08:00', portion: '1/2 cup', notes: '' },
+                      { label: 'Lunch', time: '12:30', portion: '1/2 cup', notes: '' },
+                      { label: 'Dinner', time: '17:30', portion: '1/2 cup', notes: '' },
+                      { label: 'Night snack', time: '21:00', portion: 'small treat', notes: '' },
+                    ])}
+                    className="btn-secondary text-xs py-1.5 px-3"
+                  >
+                    4x Daily (with Snacks)
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setRoutineSlots([
+                      { label: 'Morning walk', time: '07:30', portion: '', notes: '20 mins' },
+                      { label: 'Evening walk', time: '18:30', portion: '', notes: '30 mins' },
+                    ])}
+                    className="btn-secondary text-xs py-1.5 px-3"
+                  >
+                    2x Daily (Morning & Evening)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRoutineSlots([
+                      { label: 'Morning walk', time: '07:00', portion: '', notes: '25 mins' },
+                      { label: 'Mid-day walk', time: '13:00', portion: '', notes: '15 mins' },
+                      { label: 'Evening walk', time: '19:00', portion: '', notes: '30 mins' },
+                    ])}
+                    className="btn-secondary text-xs py-1.5 px-3"
+                  >
+                    3x Daily (Morning, Noon & Evening)
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Slots List */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="label mb-0">Scheduled times ({routineSlots.length})</label>
+              <button
+                type="button"
+                onClick={() => setRoutineSlots([
+                  ...routineSlots,
+                  {
+                    label: routineType === 'feeding' ? `Meal ${routineSlots.length + 1}` : `Walk ${routineSlots.length + 1}`,
+                    time: '12:00',
+                    portion: routineType === 'feeding' ? '1 cup' : '',
+                    notes: '',
+                  },
+                ])}
+                className="btn-ghost text-xs text-primary-600 py-1"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add another time
+              </button>
+            </div>
+
+            <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+              {routineSlots.map((slot, idx) => (
+                <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-3 rounded-xl border border-gray-100 bg-gray-50/70">
+                  <div className="w-full sm:w-36">
+                    <input
+                      type="text"
+                      value={slot.label}
+                      onChange={(e) => setRoutineSlots(routineSlots.map((s, i) => i === idx ? { ...s, label: e.target.value } : s))}
+                      placeholder={routineType === 'feeding' ? 'e.g. Breakfast' : 'e.g. Morning walk'}
+                      className="input text-xs py-1.5"
+                    />
+                  </div>
+                  <div className="w-full sm:w-32">
+                    <input
+                      type="time"
+                      value={slot.time}
+                      onChange={(e) => setRoutineSlots(routineSlots.map((s, i) => i === idx ? { ...s, time: e.target.value } : s))}
+                      className="input text-xs py-1.5"
+                      required
+                    />
+                  </div>
+                  {routineType === 'feeding' ? (
+                    <div className="w-full sm:w-32">
+                      <input
+                        type="text"
+                        value={slot.portion}
+                        onChange={(e) => setRoutineSlots(routineSlots.map((s, i) => i === idx ? { ...s, portion: e.target.value } : s))}
+                        placeholder="Portion"
+                        className="input text-xs py-1.5"
+                      />
+                    </div>
+                  ) : null}
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={slot.notes}
+                      onChange={(e) => setRoutineSlots(routineSlots.map((s, i) => i === idx ? { ...s, notes: e.target.value } : s))}
+                      placeholder={routineType === 'feeding' ? 'Notes (optional)' : 'Duration / Notes'}
+                      className="input text-xs py-1.5"
+                    />
+                  </div>
+                  {routineSlots.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setRoutineSlots(routineSlots.filter((_, i) => i !== idx))}
+                      className="p-2 text-gray-400 hover:text-error-500 rounded-lg hover:bg-white self-end sm:self-center transition-colors"
+                      title="Remove"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowAddRoutine(false)}
+              className="btn-secondary flex-1"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={addRoutinesBatch}
+              disabled={routineSlots.filter((s) => s.time).length === 0}
+              className="btn-primary flex-1"
+            >
+              Save all ({routineSlots.length}) routines
+            </button>
+          </div>
         </div>
       </Modal>
 

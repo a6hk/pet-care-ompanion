@@ -7,7 +7,7 @@ import { cn, relativeTime } from '@/lib/utils'
 import type { FormEvent } from 'react'
 
 export function FamilyPage() {
-  const { family, members, invites, inviteMember, removeMember, leaveFamily } = useFamily()
+  const { family, members, invites, inviteMember, removeMember, deleteInvite, leaveFamily } = useFamily()
   const { user } = useAuth()
   const [showInvite, setShowInvite] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
@@ -35,8 +35,13 @@ export function FamilyPage() {
   }
 
   async function handleRemove(memberId: string, memberEmail: string) {
-    if (!confirm(`Remove ${memberEmail} from the family?`)) return
+    if (!confirm(`Remove ${memberEmail} from this family? (This only removes them from the family; their user account remains intact).`)) return
     await removeMember(memberId)
+  }
+
+  async function handleDeleteInvite(inviteId: string, inviteEmail: string) {
+    if (!confirm(`Cancel and remove the invitation for ${inviteEmail}?`)) return
+    await deleteInvite(inviteId)
   }
 
   async function handleLeave() {
@@ -99,6 +104,8 @@ export function FamilyPage() {
                 <button
                   onClick={() => handleRemove(m.id, m.email)}
                   className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors"
+                  title="Remove from family"
+                  aria-label={`Remove ${m.email} from family`}
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -124,9 +131,20 @@ export function FamilyPage() {
                     <p className="text-xs text-gray-400">Invited {relativeTime(inv.created_at)}</p>
                   </div>
                 </div>
-                <span className="badge bg-warning-50 text-warning-700">
-                  <Clock className="w-3 h-3" /> Pending
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="badge bg-warning-50 text-warning-700">
+                    <Clock className="w-3 h-3" /> Pending
+                  </span>
+                  {isAdmin && (
+                    <button
+                      onClick={() => handleDeleteInvite(inv.id, inv.email)}
+                      className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors"
+                      title="Cancel invitation"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -144,8 +162,12 @@ export function FamilyPage() {
       <Modal open={showInvite} onClose={() => { setShowInvite(false); setError(null); setSuccess(null) }} title="Invite family member" size="sm">
         <form onSubmit={handleInvite} className="space-y-4">
           <p className="text-sm text-gray-600">
-            Enter the email of the person you want to invite. They will receive an invitation to join your family.
+            Enter the email of the person you want to add. An account will automatically be created with the default password and joined directly to your family.
           </p>
+          <div className="p-3 bg-primary-50 rounded-xl text-xs text-primary-800 space-y-1">
+            <p className="font-semibold">Dev Default Credentials:</p>
+            <p>Password: <code className="bg-white px-1.5 py-0.5 rounded font-mono font-bold text-primary-950">Welc@me135246</code></p>
+          </div>
           <div>
             <label className="label">Email address</label>
             <input

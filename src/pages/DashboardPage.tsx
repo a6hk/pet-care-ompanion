@@ -37,6 +37,9 @@ export function DashboardPage() {
 
     if (petsData && petsData.length > 0) {
       const petIds = petsData.map((p) => p.id)
+      const todayDateStr = new Date().toISOString().split('T')[0]
+
+      // Fetch checklists
       const { data: checklists } = await supabase
         .from('checklists')
         .select('id, pet_id, title, type, end_date')
@@ -50,36 +53,111 @@ export function DashboardPage() {
         })
         .map((c) => c.id)
 
-      if (activeChecklistIds.length > 0) {
-        const { data: items } = await supabase
-          .from('checklist_items')
-          .select('*, checklist_id')
-          .in('checklist_id', activeChecklistIds)
-          .order('due_time', { ascending: true, nullsFirst: false })
+      // Fetch items, routines, and appointments today
+      const [itemsRes, routinesRes, apptsRes, vaxRes] = await Promise.all([
+        activeChecklistIds.length > 0
+          ? supabase.from('checklist_items').select('*').in('checklist_id', activeChecklistIds)
+          : Promise.resolve({ data: [] }),
+        supabase.from('routines').select('*').in('pet_id', petIds),
+        supabase.from('appointments').select('*').in('pet_id', petIds).eq('date', todayDateStr),
+        supabase.from('vaccinations').select('*').in('pet_id', petIds).or(`next_due_date.eq.${todayDateStr},date_given.eq.${todayDateStr}`),
+      ])
 
-        const checklistMap = new Map((checklists as Checklist[] ?? []).map((c) => [c.id, c]))
-        const petMap = new Map((petsData as Pet[]).map((p) => [p.id, p]))
+      const checklistMap = new Map((checklists as Checklist[] ?? []).map((c) => [c.id, c]))
+      const petMap = new Map((petsData as Pet[]).map((p) => [p.id, p]))
 
-        const todaysTasks = (items as ChecklistItem[] ?? []).map((item) => {
-          const cl = checklistMap.get(item.checklist_id)
-          const pet = cl ? petMap.get(cl.pet_id) : null
-          return {
-            ...item,
-            pet_name: pet?.name ?? 'Unknown',
-            pet_id: cl?.pet_id ?? '',
-            checklist_title: cl?.title ?? '',
-            species: pet?.species ?? '',
-          } as TodaysTask
+      // Saved daily completion from localStorage
+      let localDaily: Record<string, boolean> = {}
+      try {
+        const saved = localStorage.getItem(`petpal_daily_${todayDateStr}`)
+        if (saved) localDaily = JSON.parse(saved)
+      } catch {}
+
+      const allTasks: TodaysTask[] = []
+
+      // 1. Routines
+      for (const r of (routinesRes.data ?? [])) {
+        const pet = petMap.get(r.pet_id)
+        allTasks.push({
+          id: `routine_${r.id}`,
+          checklist_id: '',
+          title: r.type === 'feeding' ? (r.portion ? `Feed: ${r.portion}` : 'Feed meal') : 'Walk',
+          due_time: r.time,
+          completed: Boolean(localDaily[`routine_${r.id}`]),
+          completed_by: null,
+          completed_at: null,
+          sort_order: 0,
+          pet_name: pet?.name ?? 'Pet',
+          pet_id: r.pet_id,
+          checklist_title: r.notes || (r.type === 'feeding' ? 'Daily Feeding' : 'Daily Walk'),
+          species: pet?.species ?? '',
         })
-        setTasks(todaysTasks)
-        setStats({
-          total: todaysTasks.length,
-          completed: todaysTasks.filter((t) => t.completed).length,
-        })
-      } else {
-        setTasks([])
-        setStats({ total: 0, completed: 0 })
       }
+
+      // 2. Checklist items
+      for (const item of (itemsRes.data ?? [])) {
+        const cl = checklistMap.get(item.checklist_id)
+        const pet = cl ? petMap.get(cl.pet_id) : null
+        allTasks.push({
+          ...item,
+          pet_name: pet?.name ?? 'Pet',
+          pet_id: cl?.pet_id ?? '',
+          checklist_title: cl?.title ?? 'Care Checklist',
+          species: pet?.species ?? '',
+        })
+      }
+
+      // 3. Appointments
+      for (const a of (apptsRes.data ?? [])) {
+        const pet = petMap.get(a.pet_id)
+        allTasks.push({
+          id: `appt_${a.id}`,
+          checklist_id: '',
+          title: `${a.type === 'vet' ? '🩺 Vet' : '✂️ Grooming'}: ${a.title}`,
+          due_time: a.time,
+          completed: Boolean(localDaily[`appt_${a.id}`]),
+          completed_by: null,
+          completed_at: null,
+          sort_order: 0,
+          pet_name: pet?.name ?? 'Pet',
+          pet_id: a.pet_id,
+          checklist_title: a.location ? `${a.location}${a.notes ? ` • ${a.notes}` : ''}` : a.notes || 'Appointment',
+          species: pet?.species ?? '',
+        })
+      }
+
+      // 4. Vaccinations
+      for (const v of (vaxRes.data ?? [])) {
+        const pet = petMap.get(v.pet_id)
+        allTasks.push({
+          id: `vax_${v.id}`,
+          checklist_id: '',
+          title: `💉 Vaccine: ${v.vaccine_name}`,
+          due_time: '09:00',
+          completed: Boolean(localDaily[`vax_${v.id}`]),
+          completed_by: null,
+          completed_at: null,
+          sort_order: 0,
+          pet_name: pet?.name ?? 'Pet',
+          pet_id: v.pet_id,
+          checklist_title: 'Vaccination Due',
+          species: pet?.species ?? '',
+        })
+      }
+
+      // Sort by time
+      allTasks.sort((a, b) => {
+        if (!a.due_time && !b.due_time) return 0
+        if (!a.due_time) return 1
+        if (!b.due_time) return -1
+        return a.due_time.localeCompare(b.due_time)
+      })
+
+      setTasks(allTasks)
+      setStats({
+        total: allTasks.length,
+        completed: allTasks.filter((t) => t.completed).length,
+      })
     } else {
       setTasks([])
       setStats({ total: 0, completed: 0 })
@@ -102,25 +180,50 @@ export function DashboardPage() {
 
   async function toggleTask(task: TodaysTask) {
     const completed = !task.completed
-    const { error } = await supabase
-      .from('checklist_items')
-      .update({
-        completed,
-        completed_by: completed ? user!.id : null,
-        completed_at: completed ? new Date().toISOString() : null,
-      })
-      .eq('id', task.id)
-    if (error) return
+    const todayDateStr = new Date().toISOString().split('T')[0]
 
-    if (completed && family) {
-      await supabase.from('activity_log').insert({
-        family_id: family.id,
-        pet_id: task.pet_id,
-        user_id: user!.id,
-        user_email: user!.email!,
-        action: 'completed_task',
-        details: `"${task.title}" for ${task.pet_name}`,
-      })
+    if (task.id.startsWith('routine_') || task.id.startsWith('appt_') || task.id.startsWith('vax_')) {
+      let localDaily: Record<string, boolean> = {}
+      try {
+        const saved = localStorage.getItem(`petpal_daily_${todayDateStr}`)
+        if (saved) localDaily = JSON.parse(saved)
+      } catch {}
+      localDaily[task.id] = completed
+      try {
+        localStorage.setItem(`petpal_daily_${todayDateStr}`, JSON.stringify(localDaily))
+      } catch {}
+
+      if (completed && family) {
+        await supabase.from('activity_log').insert({
+          family_id: family.id,
+          pet_id: task.pet_id,
+          user_id: user?.id,
+          user_email: user?.email || '',
+          action: 'completed_routine',
+          details: `"${task.title}" for ${task.pet_name}`,
+        })
+      }
+    } else {
+      const { error } = await supabase
+        .from('checklist_items')
+        .update({
+          completed,
+          completed_by: completed ? user!.id : null,
+          completed_at: completed ? new Date().toISOString() : null,
+        })
+        .eq('id', task.id)
+      if (error) return
+
+      if (completed && family) {
+        await supabase.from('activity_log').insert({
+          family_id: family.id,
+          pet_id: task.pet_id,
+          user_id: user!.id,
+          user_email: user!.email!,
+          action: 'completed_task',
+          details: `"${task.title}" for ${task.pet_name}`,
+        })
+      }
     }
 
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed } : t)))
@@ -128,10 +231,6 @@ export function DashboardPage() {
       ...prev,
       completed: prev.completed + (completed ? 1 : -1),
     }))
-
-    if (completed) {
-      loadData()
-    }
   }
 
   if (loading) {

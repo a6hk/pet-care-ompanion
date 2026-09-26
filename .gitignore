@@ -1,2 +1,11 @@
 node_modules/
 .env
+.env.local
+.env.*.local
+dist/
+dist-ssr/
+*.local
+.DS_Store
+*.tsbuildinfo
+supabase/.temp/
+supabase/.branches/
