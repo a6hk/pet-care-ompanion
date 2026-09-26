@@ -3,7 +3,21 @@ import { useFamily } from '@/context/FamilyContext'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Circle, Plus, PawPrint, Activity, TrendingUp, Calendar as CalIcon, ChevronDown, ChevronUp, ArrowRight } from 'lucide-react'
+import {
+  CheckCircle2,
+  Circle,
+  Plus,
+  PawPrint,
+  Calendar as CalIcon,
+  ChevronDown,
+  ChevronUp,
+  ArrowRight,
+  Sparkles,
+  FileText,
+  Clock,
+  Activity,
+  HeartHandshake,
+} from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { formatTime, formatDate, relativeTime, speciesIcon, cn } from '@/lib/utils'
 import type { Pet, ChecklistItem, Checklist, ActivityLog } from '@/types'
@@ -31,6 +45,74 @@ interface UpcomingEvent {
   isOverdue?: boolean
 }
 
+function getGreeting(name?: string | null): string {
+  const hour = new Date().getHours()
+  const firstName = name?.split(' ')[0] || 'there'
+  if (hour < 12) return `Good morning, ${firstName}`
+  if (hour < 17) return `Good afternoon, ${firstName}`
+  return `Good evening, ${firstName}`
+}
+
+function getTimeContext(dueTime?: string | null): { label: string; period: string } | null {
+  if (!dueTime) return null
+  const [hourStr] = dueTime.split(':')
+  const hour = parseInt(hourStr, 10)
+  if (isNaN(hour)) return null
+  if (hour < 12) return { label: formatTime(dueTime), period: 'Morning' }
+  if (hour < 17) return { label: formatTime(dueTime), period: 'Afternoon' }
+  return { label: formatTime(dueTime), period: 'Evening' }
+}
+
+function getTaskBadge(task: TodaysTask) {
+  if (task.id.startsWith('routine_')) {
+    const isFeeding =
+      task.title.toLowerCase().includes('feed') ||
+      task.checklist_title.toLowerCase().includes('feed')
+    if (isFeeding) {
+      return { icon: '🍽️', label: 'Feeding', style: 'bg-amber-50 text-amber-700 border-amber-200/60' }
+    }
+    return { icon: '🦮', label: 'Walk', style: 'bg-emerald-50 text-emerald-700 border-emerald-200/60' }
+  }
+  if (task.id.startsWith('appt_')) {
+    const isVet = task.title.toLowerCase().includes('vet')
+    if (isVet) {
+      return { icon: '🩺', label: 'Vet Visit', style: 'bg-blue-50 text-blue-700 border-blue-200/60' }
+    }
+    return { icon: '✂️', label: 'Grooming', style: 'bg-purple-50 text-purple-700 border-purple-200/60' }
+  }
+  if (task.id.startsWith('vax_')) {
+    return { icon: '💉', label: 'Vaccine', style: 'bg-rose-50 text-rose-700 border-rose-200/60' }
+  }
+  return { icon: '💊', label: 'Care Task', style: 'bg-primary-50 text-primary-700 border-primary-200/60' }
+}
+
+function formatActivityLog(log: ActivityLog): { user: string; text: string; details?: string } {
+  const userName = log.user_email?.split('@')[0] || 'Member'
+  const capitalizedUser = userName.charAt(0).toUpperCase() + userName.slice(1)
+
+  switch (log.action) {
+    case 'completed_routine':
+    case 'completed_task': {
+      const taskName = log.details || 'a task'
+      return {
+        user: capitalizedUser,
+        text: `completed ${taskName}`,
+      }
+    }
+    case 'added_pet':
+      return { user: capitalizedUser, text: `added pet ${log.details || ''}` }
+    case 'created_checklist':
+      return { user: capitalizedUser, text: `created checklist "${log.details || ''}"` }
+    case 'submitted_feedback':
+      return { user: capitalizedUser, text: `submitted feedback ${log.details || ''}` }
+    default:
+      return {
+        user: capitalizedUser,
+        text: `${log.action.replace(/_/g, ' ')} ${log.details || ''}`,
+      }
+  }
+}
+
 function getEventDateLabel(dateStr: string): { label: string; isToday: boolean; isPast: boolean } {
   const [y, m, d] = dateStr.split('-').map(Number)
   const target = new Date(y, m - 1, d)
@@ -49,7 +131,7 @@ function getEventDateLabel(dateStr: string): { label: string; isToday: boolean; 
 
 export function DashboardPage() {
   const { family } = useFamily()
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [pets, setPets] = useState<Pet[]>([])
   const [tasks, setTasks] = useState<TodaysTask[]>([])
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
@@ -57,6 +139,8 @@ export function DashboardPage() {
   const [stats, setStats] = useState<{ total: number; completed: number }>({ total: 0, completed: 0 })
   const [loading, setLoading] = useState(true)
   const [expandedPets, setExpandedPets] = useState<Record<string, boolean>>({})
+
+  const todayDateStr = useMemo(() => new Date().toISOString().split('T')[0], [])
 
   const togglePetExpanded = (petId: string) => {
     setExpandedPets((prev) => ({
@@ -123,12 +207,11 @@ export function DashboardPage() {
       .select('*')
       .eq('family_id', family.id)
       .order('created_at', { ascending: true })
-    setPets(petsData as Pet[] ?? [])
+    setPets((petsData as Pet[]) ?? [])
 
     if (petsData && petsData.length > 0) {
       const petIds = petsData.map((p) => p.id)
       const today = new Date()
-      const todayDateStr = today.toISOString().split('T')[0]
       const in7Days = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000)
       const in7DaysDateStr = in7Days.toISOString().split('T')[0]
       const past7Days = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
@@ -140,7 +223,7 @@ export function DashboardPage() {
         .select('id, pet_id, title, type, end_date')
         .in('pet_id', petIds)
 
-      const activeChecklistIds = (checklists as (Checklist & { pet_id: string })[] ?? [])
+      const activeChecklistIds = ((checklists as (Checklist & { pet_id: string })[]) ?? [])
         .filter((c) => {
           if (c.type === 'recurring') return true
           if (!c.end_date) return true
@@ -155,18 +238,35 @@ export function DashboardPage() {
           : Promise.resolve({ data: [] }),
         supabase.from('routines').select('*').in('pet_id', petIds),
         supabase.from('appointments').select('*').in('pet_id', petIds).eq('date', todayDateStr),
-        supabase.from('vaccinations').select('*').in('pet_id', petIds).or(`next_due_date.eq.${todayDateStr},date_given.eq.${todayDateStr}`),
-        supabase.from('appointments').select('*').in('pet_id', petIds).gte('date', past7DaysDateStr).lte('date', in7DaysDateStr).order('date', { ascending: true }),
-        supabase.from('vaccinations').select('*').in('pet_id', petIds).not('next_due_date', 'is', null).gte('next_due_date', past7DaysDateStr).lte('next_due_date', in7DaysDateStr).order('next_due_date', { ascending: true }),
+        supabase
+          .from('vaccinations')
+          .select('*')
+          .in('pet_id', petIds)
+          .or(`next_due_date.eq.${todayDateStr},date_given.eq.${todayDateStr}`),
+        supabase
+          .from('appointments')
+          .select('*')
+          .in('pet_id', petIds)
+          .gte('date', past7DaysDateStr)
+          .lte('date', in7DaysDateStr)
+          .order('date', { ascending: true }),
+        supabase
+          .from('vaccinations')
+          .select('*')
+          .in('pet_id', petIds)
+          .not('next_due_date', 'is', null)
+          .gte('next_due_date', past7DaysDateStr)
+          .lte('next_due_date', in7DaysDateStr)
+          .order('next_due_date', { ascending: true }),
       ])
 
-      const checklistMap = new Map((checklists as Checklist[] ?? []).map((c) => [c.id, c]))
+      const checklistMap = new Map(((checklists as Checklist[]) ?? []).map((c) => [c.id, c]))
       const petMap = new Map((petsData as Pet[]).map((p) => [p.id, p]))
 
       // Process upcoming non-daily events (appointments & vaccinations)
       const eventsList: UpcomingEvent[] = []
 
-      for (const a of (upcomingApptsRes.data ?? [])) {
+      for (const a of upcomingApptsRes.data ?? []) {
         const pet = petMap.get(a.pet_id)
         const rel = getEventDateLabel(a.date)
         eventsList.push({
@@ -186,7 +286,7 @@ export function DashboardPage() {
         })
       }
 
-      for (const v of (upcomingVaxRes.data ?? [])) {
+      for (const v of upcomingVaxRes.data ?? []) {
         const pet = petMap.get(v.pet_id)
         const rel = getEventDateLabel(v.next_due_date!)
         eventsList.push({
@@ -244,7 +344,7 @@ export function DashboardPage() {
       const allTasks: TodaysTask[] = []
 
       // 1. Routines
-      for (const r of (routinesRes.data ?? [])) {
+      for (const r of routinesRes.data ?? []) {
         const pet = petMap.get(r.pet_id)
         allTasks.push({
           id: `routine_${r.id}`,
@@ -263,7 +363,7 @@ export function DashboardPage() {
       }
 
       // 2. Checklist items
-      for (const item of (itemsRes.data ?? [])) {
+      for (const item of itemsRes.data ?? []) {
         const cl = checklistMap.get(item.checklist_id)
         const pet = cl ? petMap.get(cl.pet_id) : null
         allTasks.push({
@@ -276,7 +376,7 @@ export function DashboardPage() {
       }
 
       // 3. Appointments
-      for (const a of (apptsRes.data ?? [])) {
+      for (const a of apptsRes.data ?? []) {
         const pet = petMap.get(a.pet_id)
         allTasks.push({
           id: `appt_${a.id}`,
@@ -295,7 +395,7 @@ export function DashboardPage() {
       }
 
       // 4. Vaccinations
-      for (const v of (vaxRes.data ?? [])) {
+      for (const v of vaxRes.data ?? []) {
         const pet = petMap.get(v.pet_id)
         allTasks.push({
           id: `vax_${v.id}`,
@@ -337,10 +437,10 @@ export function DashboardPage() {
       .eq('family_id', family.id)
       .order('created_at', { ascending: false })
       .limit(10)
-    setActivity(activityData as ActivityLog[] ?? [])
+    setActivity((activityData as ActivityLog[]) ?? [])
 
     setLoading(false)
-  }, [family])
+  }, [family, todayDateStr])
 
   useEffect(() => {
     loadData()
@@ -348,7 +448,6 @@ export function DashboardPage() {
 
   async function toggleTask(task: TodaysTask) {
     const completed = !task.completed
-    const todayDateStr = new Date().toISOString().split('T')[0]
 
     if (task.id.startsWith('routine_') || task.id.startsWith('appt_') || task.id.startsWith('vax_')) {
       let localDaily: Record<string, boolean> = {}
@@ -403,8 +502,11 @@ export function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <p className="text-gray-400">Loading dashboard...</p>
+      <div className="flex items-center justify-center py-24">
+        <div className="text-center space-y-3">
+          <div className="w-10 h-10 border-3 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm font-medium text-gray-500">Loading your pet care dashboard...</p>
+        </div>
       </div>
     )
   }
@@ -413,70 +515,149 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Today's pet care at a glance</p>
+      {/* Hero Welcome Banner with Interactive Progress & Pet Avatars */}
+      <div className="card p-6 sm:p-7 bg-gradient-to-br from-primary-600 via-primary-700 to-primary-900 text-white relative overflow-hidden shadow-md border-0">
+        {/* Subtle decorative background blur */}
+        <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-white/5 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute right-32 -top-10 w-32 h-32 bg-secondary-400/10 rounded-full blur-xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2 max-w-xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-xs font-medium text-primary-100 border border-white/10">
+              <Sparkles className="w-3.5 h-3.5 text-accent-300" />
+              <span>{formatDate(todayDateStr)}</span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+              {getGreeting(profile?.full_name)}
+            </h1>
+            <p className="text-sm sm:text-base text-primary-100/90 leading-relaxed">
+              {stats.total === 0 ? (
+                'Welcome to PetPal! Add your pets and setup daily feeding or routines to start tracking care.'
+              ) : stats.completed === stats.total ? (
+                'All caught up! 🎉 Your family completed all pet care tasks for today.'
+              ) : (
+                `Your family is ${completionRate}% through today's pet care (${stats.completed} of ${stats.total} tasks completed).`
+              )}
+            </p>
+
+            {/* Pet Avatars Quick Status */}
+            {groupedPets.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <span className="text-xs text-primary-200 font-medium">Pets today:</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {groupedPets.map((g) => {
+                    const done = g.completedCount === g.totalCount && g.totalCount > 0
+                    return (
+                      <button
+                        key={g.petId}
+                        type="button"
+                        onClick={() => togglePetExpanded(g.petId)}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all backdrop-blur-md cursor-pointer',
+                          done
+                            ? 'bg-emerald-500/30 text-emerald-100 border border-emerald-400/40 hover:bg-emerald-500/40'
+                            : 'bg-white/15 text-white border border-white/20 hover:bg-white/25'
+                        )}
+                        title={`Click to view ${g.petName}'s tasks (${g.completedCount}/${g.totalCount})`}
+                      >
+                        <span>{speciesIcon(g.species)}</span>
+                        <span className="font-semibold">{g.petName}</span>
+                        <span className="text-[10px] opacity-85 font-mono">
+                          ({g.completedCount}/{g.totalCount})
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Radial / Progress Visual Ring */}
+          {stats.total > 0 && (
+            <div className="flex items-center gap-5 bg-white/10 backdrop-blur-md p-4 sm:p-5 rounded-2xl border border-white/15 shrink-0 self-start md:self-auto">
+              <div className="relative w-16 h-16 flex items-center justify-center">
+                <svg className="w-16 h-16 transform -rotate-90" viewBox="0 0 36 36">
+                  <path
+                    className="text-white/20"
+                    strokeWidth="3.5"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                  <path
+                    className="text-white transition-all duration-700 ease-out"
+                    strokeDasharray={`${completionRate}, 100`}
+                    strokeWidth="3.5"
+                    strokeLinecap="round"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                </svg>
+                <span className="absolute text-sm font-bold text-white font-mono">{completionRate}%</span>
+              </div>
+              <div className="text-left">
+                <p className="text-xs text-primary-200 font-medium">Daily Progress</p>
+                <p className="text-lg font-bold text-white leading-tight mt-0.5">
+                  {stats.completed} <span className="text-xs font-normal text-primary-200">/ {stats.total} done</span>
+                </p>
+                <p className="text-[11px] text-primary-200/80 mt-0.5">
+                  {stats.total - stats.completed === 0 ? 'All finished 🎉' : `${stats.total - stats.completed} remaining`}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
-        <Link to="/app/pets" className="btn-primary">
-          <Plus className="w-4 h-4" />
-          Add pet
-        </Link>
       </div>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <PawPrint className="w-5 h-5 text-primary-500" />
-            <span className="text-2xl font-bold text-gray-900">{pets.length}</span>
-          </div>
-          <p className="text-xs text-gray-500 font-medium">Pets in family</p>
+      {/* Quick Action Navigation Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-gray-100 shadow-2xs">
+        <div className="flex items-center gap-2 text-xs text-gray-500 font-medium px-1">
+          <HeartHandshake className="w-4 h-4 text-primary-600" />
+          <span>Quick actions:</span>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <CheckCircle2 className="w-5 h-5 text-success-500" />
-            <span className="text-2xl font-bold text-gray-900">{stats.completed}/{stats.total}</span>
-          </div>
-          <p className="text-xs text-gray-500 font-medium">Tasks done today</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <TrendingUp className="w-5 h-5 text-secondary-500" />
-            <span className="text-2xl font-bold text-gray-900">{completionRate}%</span>
-          </div>
-          <p className="text-xs text-gray-500 font-medium">Completion rate</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <Activity className="w-5 h-5 text-accent-500" />
-            <span className="text-2xl font-bold text-gray-900">{activity.length}</span>
-          </div>
-          <p className="text-xs text-gray-500 font-medium">Recent activities</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/app/pets"
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 hover:border-primary-300"
+          >
+            <PawPrint className="w-3.5 h-3.5 text-primary-600" />
+            <span>Add Pet</span>
+          </Link>
+          <Link
+            to="/app/checklists"
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 hover:border-primary-300"
+          >
+            <Plus className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Add Routine / Task</span>
+          </Link>
+          <Link
+            to="/app/calendar"
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 hover:border-primary-300"
+          >
+            <CalIcon className="w-3.5 h-3.5 text-blue-600" />
+            <span>Schedule Appointment</span>
+          </Link>
+          <Link
+            to="/app/pets"
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 hover:border-primary-300"
+          >
+            <FileText className="w-3.5 h-3.5 text-accent-600" />
+            <span>View Pet Records</span>
+          </Link>
         </div>
       </div>
 
-      {/* Progress bar */}
-      {stats.total > 0 && (
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-gray-700">Today's progress</h3>
-            <span className="text-sm font-bold text-primary-600">{completionRate}%</span>
-          </div>
-          <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-primary-400 to-primary-600 rounded-full transition-all duration-500"
-              style={{ width: `${completionRate}%` }}
-            />
-          </div>
-        </div>
-      )}
-
+      {/* Main Grid: Today's Tasks & Right Widgets */}
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Today's tasks */}
+        {/* Today's Tasks Column */}
         <div className="lg:col-span-2 card p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-gray-900">Today's tasks</h2>
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-primary-600" />
+              <h2 className="text-base font-semibold text-gray-900">Today's tasks</h2>
+            </div>
             <div className="flex items-center gap-3">
               {groupedPets.length > 1 && (
                 <button
@@ -487,9 +668,7 @@ export function DashboardPage() {
                   }}
                   className="text-xs text-gray-500 hover:text-gray-800 font-medium transition-colors"
                 >
-                  {groupedPets.some((g) => !expandedPets[g.petId])
-                    ? 'Expand all'
-                    : 'Collapse all'}
+                  {groupedPets.some((g) => !expandedPets[g.petId]) ? 'Expand all' : 'Collapse all'}
                 </button>
               )}
               <Link to="/app/checklists" className="text-xs text-primary-600 font-medium hover:underline">
@@ -501,12 +680,12 @@ export function DashboardPage() {
           {tasks.length === 0 ? (
             <EmptyState
               icon={<CheckCircle2 className="w-10 h-10" />}
-              title="No tasks for today"
-              description="Create checklists or add routines to start tracking your pet care tasks."
+              title="No tasks scheduled for today"
+              description="Set up daily routines (feeding, walks) or create care checklists to track your tasks."
               action={
                 <Link to="/app/checklists" className="btn-primary">
                   <Plus className="w-4 h-4" />
-                  Create checklist
+                  Create routine or checklist
                 </Link>
               }
             />
@@ -515,11 +694,13 @@ export function DashboardPage() {
               {groupedPets.map((group) => {
                 const isExpanded = Boolean(expandedPets[group.petId])
                 const allDone = group.completedCount === group.totalCount && group.totalCount > 0
+                const petPercent =
+                  group.totalCount > 0 ? Math.round((group.completedCount / group.totalCount) * 100) : 0
 
                 return (
                   <div
                     key={group.petId}
-                    className="border border-gray-100 rounded-2xl bg-white overflow-hidden shadow-xs transition-all hover:border-gray-200"
+                    className="border border-gray-100 rounded-2xl bg-white overflow-hidden shadow-2xs transition-all hover:border-gray-200"
                   >
                     {/* Pet Accordion Header */}
                     <button
@@ -532,10 +713,10 @@ export function DashboardPage() {
                           <img
                             src={group.petPhoto}
                             alt={group.petName}
-                            className="w-9 h-9 rounded-xl object-cover ring-1 ring-gray-200/60"
+                            className="w-10 h-10 rounded-xl object-cover ring-1 ring-gray-200/60"
                           />
                         ) : (
-                          <div className="w-9 h-9 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center text-lg flex-shrink-0">
+                          <div className="w-10 h-10 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center text-xl flex-shrink-0">
                             {speciesIcon(group.species)}
                           </div>
                         )}
@@ -548,9 +729,13 @@ export function DashboardPage() {
                               {group.species}
                             </span>
                           </div>
-                          <p className="text-xs text-gray-500">
-                            {group.totalCount === 1 ? '1 task' : `${group.totalCount} tasks`} scheduled
-                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <p className="text-xs text-gray-500">
+                              {group.totalCount === 1 ? '1 task' : `${group.totalCount} tasks`} scheduled
+                            </p>
+                            <span className="text-gray-300">•</span>
+                            <span className="text-xs font-medium text-gray-600">{petPercent}% done</span>
+                          </div>
                         </div>
                       </div>
 
@@ -563,9 +748,7 @@ export function DashboardPage() {
                               : 'bg-primary-50 text-primary-700 border border-primary-200/60'
                           }`}
                         >
-                          {allDone ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-success-600" />
-                          ) : null}
+                          {allDone ? <CheckCircle2 className="w-3.5 h-3.5 text-success-600" /> : null}
                           {group.completedCount}/{group.totalCount} done
                         </span>
 
@@ -580,36 +763,78 @@ export function DashboardPage() {
                       </div>
                     </button>
 
+                    {/* Mini visual progress track under header */}
+                    <div className="w-full bg-gray-100 h-1">
+                      <div
+                        className={cn(
+                          'h-full transition-all duration-500',
+                          allDone ? 'bg-success-500' : 'bg-primary-500'
+                        )}
+                        style={{ width: `${petPercent}%` }}
+                      />
+                    </div>
+
                     {/* Collapsible Tasks List */}
                     {isExpanded && (
-                      <div className="border-t border-gray-50 bg-gray-50/30 px-2 py-2 space-y-1">
-                        {group.tasks.map((task) => (
-                          <button
-                            key={task.id}
-                            type="button"
-                            onClick={() => toggleTask(task)}
-                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white transition-all text-left group"
-                          >
-                            {task.completed ? (
-                              <CheckCircle2 className="w-5 h-5 text-success-500 flex-shrink-0 animate-check-pop" />
-                            ) : (
-                              <Circle className="w-5 h-5 text-gray-300 flex-shrink-0 group-hover:text-primary-400 transition-colors" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p
-                                className={`text-sm font-medium ${
-                                  task.completed ? 'text-gray-400 line-through' : 'text-gray-900'
-                                }`}
-                              >
-                                {task.title}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {task.checklist_title}
-                                {task.due_time ? ` • ${formatTime(task.due_time)}` : ''}
-                              </p>
-                            </div>
-                          </button>
-                        ))}
+                      <div className="border-t border-gray-50 bg-gray-50/30 px-2 py-2 space-y-1.5">
+                        {group.tasks.map((task) => {
+                          const badge = getTaskBadge(task)
+                          const timeInfo = getTimeContext(task.due_time)
+
+                          return (
+                            <button
+                              key={task.id}
+                              type="button"
+                              onClick={() => toggleTask(task)}
+                              className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl hover:bg-white transition-all text-left group border border-transparent hover:border-gray-100 hover:shadow-2xs"
+                            >
+                              <div className="flex items-center gap-3 min-w-0 flex-1">
+                                {task.completed ? (
+                                  <CheckCircle2 className="w-5 h-5 text-success-500 flex-shrink-0 animate-check-pop" />
+                                ) : (
+                                  <Circle className="w-5 h-5 text-gray-300 flex-shrink-0 group-hover:text-primary-500 transition-colors" />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <p
+                                      className={cn(
+                                        'text-sm font-medium transition-all',
+                                        task.completed ? 'text-gray-400 line-through' : 'text-gray-900'
+                                      )}
+                                    >
+                                      {task.title}
+                                    </p>
+                                    {/* Visual activity pill */}
+                                    <span
+                                      className={cn(
+                                        'inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md border',
+                                        badge.style
+                                      )}
+                                    >
+                                      <span>{badge.icon}</span>
+                                      <span>{badge.label}</span>
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                                    {task.checklist_title}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Time context tag */}
+                              {timeInfo ? (
+                                <div className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg bg-gray-100 text-gray-700 shrink-0">
+                                  <Clock className="w-3 h-3 text-gray-400" />
+                                  <span>{timeInfo.period}</span>
+                                  <span className="text-gray-400 font-normal">•</span>
+                                  <span>{timeInfo.label}</span>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-gray-400 shrink-0">Anytime</span>
+                              )}
+                            </button>
+                          )
+                        })}
                       </div>
                     )}
                   </div>
@@ -628,7 +853,10 @@ export function DashboardPage() {
                 <CalIcon className="w-4 h-4 text-primary-600" />
                 <h2 className="text-base font-semibold text-gray-900">Upcoming events</h2>
               </div>
-              <Link to="/app/calendar" className="text-xs text-primary-600 font-medium hover:underline flex items-center gap-1">
+              <Link
+                to="/app/calendar"
+                className="text-xs text-primary-600 font-medium hover:underline flex items-center gap-1"
+              >
                 Calendar <ArrowRight className="w-3 h-3" />
               </Link>
             </div>
@@ -638,7 +866,10 @@ export function DashboardPage() {
                 <CalIcon className="w-6 h-6 text-gray-400 mx-auto mb-1.5" />
                 <p className="text-xs font-medium text-gray-600">No upcoming events</p>
                 <p className="text-[11px] text-gray-400 mt-0.5">No vet visits or vaccines in the 7-day window.</p>
-                <Link to="/app/calendar" className="inline-block text-xs font-semibold text-primary-600 mt-2 hover:underline">
+                <Link
+                  to="/app/calendar"
+                  className="inline-block text-xs font-semibold text-primary-600 mt-2 hover:underline"
+                >
                   + Schedule event
                 </Link>
               </div>
@@ -661,9 +892,7 @@ export function DashboardPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <p className="text-xs font-semibold text-gray-900 truncate">
-                          {evt.title}
-                        </p>
+                        <p className="text-xs font-semibold text-gray-900 truncate">{evt.title}</p>
                         <span
                           className={cn(
                             'text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap',
@@ -678,14 +907,17 @@ export function DashboardPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                        <span>{speciesIcon(evt.species)} {evt.pet_name}</span>
+                        <span>
+                          {speciesIcon(evt.species)} {evt.pet_name}
+                        </span>
                         <span>•</span>
-                        <span>{formatDate(evt.date)}{evt.time ? ` at ${formatTime(evt.time)}` : ''}</span>
+                        <span>
+                          {formatDate(evt.date)}
+                          {evt.time ? ` at ${formatTime(evt.time)}` : ''}
+                        </span>
                       </div>
                       {evt.location && (
-                        <p className="text-[11px] text-gray-400 mt-0.5 truncate">
-                          📍 {evt.location}
-                        </p>
+                        <p className="text-[11px] text-gray-400 mt-0.5 truncate">📍 {evt.location}</p>
                       )}
                     </div>
                   </div>
@@ -696,26 +928,35 @@ export function DashboardPage() {
 
           {/* Recent activity */}
           <div className="card p-5">
-            <h2 className="text-base font-semibold text-gray-900 mb-4">Recent activity</h2>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-accent-600" />
+                <h2 className="text-base font-semibold text-gray-900">Recent family activity</h2>
+              </div>
+            </div>
+
             {activity.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-8">No activity yet</p>
             ) : (
               <div className="space-y-3">
-                {activity.map((log) => (
-                  <div key={log.id} className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-full bg-primary-50 text-primary-600 flex items-center justify-center text-xs font-semibold flex-shrink-0">
-                      {log.user_email[0]?.toUpperCase()}
+                {activity.map((log) => {
+                  const item = formatActivityLog(log)
+
+                  return (
+                    <div key={log.id} className="flex items-start gap-3">
+                      <div className="w-7 h-7 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                        {log.user_email[0]?.toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-gray-700 leading-relaxed">
+                          <span className="font-semibold text-gray-900">{item.user}</span>{' '}
+                          <span>{item.text}</span>
+                        </p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">{relativeTime(log.created_at)}</p>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-700">
-                        <span className="font-medium">{log.user_email.split('@')[0]}</span>{' '}
-                        {log.action === 'completed_task' ? 'completed' : log.action.replace(/_/g, ' ')}
-                        {log.details && <span className="text-gray-500"> {log.details}</span>}
-                      </p>
-                      <p className="text-xs text-gray-400">{relativeTime(log.created_at)}</p>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -726,7 +967,10 @@ export function DashboardPage() {
       {pets.length > 0 && (
         <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-gray-900">Your pets</h2>
+            <div className="flex items-center gap-2">
+              <PawPrint className="w-4 h-4 text-primary-600" />
+              <h2 className="text-base font-semibold text-gray-900">Your pets ({pets.length})</h2>
+            </div>
             <Link to="/app/pets" className="text-xs text-primary-600 font-medium hover:underline">
               Manage pets
             </Link>
@@ -736,19 +980,20 @@ export function DashboardPage() {
               <Link
                 key={pet.id}
                 to={`/app/pets/${pet.id}`}
-                className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-primary-200 hover:bg-primary-50/50 transition-all"
+                className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-primary-200 hover:bg-primary-50/50 transition-all group"
               >
                 {pet.photo_url ? (
-                  <img src={pet.photo_url} alt={pet.name} className="w-12 h-12 rounded-xl object-cover" />
+                  <img src={pet.photo_url} alt={pet.name} className="w-12 h-12 rounded-xl object-cover ring-1 ring-gray-200/60 group-hover:scale-105 transition-transform" />
                 ) : (
-                  <div className="w-12 h-12 rounded-xl bg-primary-50 flex items-center justify-center text-2xl">
+                  <div className="w-12 h-12 rounded-xl bg-primary-50 text-primary-700 flex items-center justify-center text-2xl group-hover:scale-105 transition-transform">
                     {speciesIcon(pet.species)}
                   </div>
                 )}
-                <div className="min-w-0">
-                  <p className="font-medium text-gray-900 truncate">{pet.name}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-gray-900 text-sm truncate group-hover:text-primary-700 transition-colors">{pet.name}</p>
                   <p className="text-xs text-gray-500 truncate">{pet.breed || pet.species}</p>
                 </div>
+                <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-primary-600 group-hover:translate-x-0.5 transition-all" />
               </Link>
             ))}
           </div>
