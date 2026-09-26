@@ -1,37 +1,75 @@
 /**
  * Google Gemini AI Integration Engine for PetPal
- * Supports gemini-2.5-flash and gemini-1.5-flash for sub-second, intelligent
+ * Supports gemini-3.8-flash and gemini-flash-latest for sub-second, intelligent
  * pet care consultations, vet discharge action item extraction, and care program generation.
  */
 
 import type { ExtractedPrescriptionDetails } from './aiChecklistParser'
 import type { Pet } from '@/types'
 
-const PRIMARY_MODEL = 'gemini-2.5-flash'
-const FALLBACK_MODEL = 'gemini-1.5-flash'
+// Candidate models ordered by speed and general availability with automatic cascade fallback
+const CANDIDATE_MODELS = [
+  'gemini-flash-latest',
+  'gemini-3-flash-preview',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
+]
 
 /**
  * Retrieve the Gemini API key from environment variable or user localStorage
  */
 export function getGeminiApiKey(): string {
-  const envKey = import.meta.env.VITE_GEMINI_API_KEY
-  if (envKey && typeof envKey === 'string' && envKey.trim().length > 0) {
-    return envKey.trim()
+  // Check Vite client-side environment
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) {
+      const envKey = import.meta.env.VITE_GEMINI_API_KEY
+      if (typeof envKey === 'string' && envKey.trim().length > 0) {
+        return envKey.trim()
+      }
+    }
+  } catch {
+    // ignore
   }
 
-  const localKey = localStorage.getItem('petpal_gemini_api_key')
-  if (localKey && typeof localKey === 'string' && localKey.trim().length > 0) {
-    return localKey.trim()
+  // Node / test environment fallback
+  try {
+    const globalProcess = (globalThis as any)?.process
+    if (globalProcess?.env?.VITE_GEMINI_API_KEY) {
+      const procKey = globalProcess.env.VITE_GEMINI_API_KEY
+      if (typeof procKey === 'string' && procKey.trim().length > 0) {
+        return procKey.trim()
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // User manual key stored in browser localStorage
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const localKey = localStorage.getItem('petpal_gemini_api_key')
+      if (localKey && typeof localKey === 'string' && localKey.trim().length > 0) {
+        return localKey.trim()
+      }
+    }
+  } catch {
+    // ignore
   }
 
   return ''
 }
 
 export function setGeminiApiKey(key: string): void {
-  if (key && key.trim()) {
-    localStorage.setItem('petpal_gemini_api_key', key.trim())
-  } else {
-    localStorage.removeItem('petpal_gemini_api_key')
+  try {
+    if (typeof localStorage !== 'undefined') {
+      if (key && key.trim()) {
+        localStorage.setItem('petpal_gemini_api_key', key.trim())
+      } else {
+        localStorage.removeItem('petpal_gemini_api_key')
+      }
+    }
+  } catch {
+    // ignore
   }
 }
 
@@ -120,17 +158,32 @@ export async function callGeminiApi({
     return textOutput
   }
 
-  try {
-    return await tryModel(PRIMARY_MODEL)
-  } catch (err: any) {
-    // If primary model failed (e.g. 404 not found on 2.5), try 1.5-flash fallback
-    const errMsg = err?.message || ''
-    if (errMsg.includes('404') || errMsg.includes('not found') || errMsg.includes('unsupported')) {
-      console.warn(`Falling back to ${FALLBACK_MODEL} due to:`, errMsg)
-      return await tryModel(FALLBACK_MODEL)
+  let lastError: any = null
+  for (const model of CANDIDATE_MODELS) {
+    try {
+      return await tryModel(model)
+    } catch (err: any) {
+      lastError = err
+      const errMsg = (err?.message || '').toLowerCase()
+      // If error is 404, 503 (high demand), 429 (rate limit), 500, or temporary spike, try next candidate
+      if (
+        errMsg.includes('404') ||
+        errMsg.includes('503') ||
+        errMsg.includes('429') ||
+        errMsg.includes('500') ||
+        errMsg.includes('demand') ||
+        errMsg.includes('not found') ||
+        errMsg.includes('unsupported') ||
+        errMsg.includes('unavailable')
+      ) {
+        console.warn(`Model ${model} unavailable (${err?.message?.slice(0, 80)}...). Trying next candidate model...`)
+        continue
+      }
+      throw err
     }
-    throw err
   }
+
+  throw lastError || new Error('All candidate Gemini models failed.')
 }
 
 /**
