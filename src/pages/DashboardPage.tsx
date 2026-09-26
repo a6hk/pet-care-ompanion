@@ -3,9 +3,9 @@ import { useFamily } from '@/context/FamilyContext'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Circle, Plus, PawPrint, Activity, TrendingUp, Calendar as CalIcon, ChevronDown, ChevronUp } from 'lucide-react'
+import { CheckCircle2, Circle, Plus, PawPrint, Activity, TrendingUp, Calendar as CalIcon, ChevronDown, ChevronUp, ArrowRight } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
-import { formatTime, relativeTime, speciesIcon } from '@/lib/utils'
+import { formatTime, formatDate, relativeTime, speciesIcon, cn } from '@/lib/utils'
 import type { Pet, ChecklistItem, Checklist, ActivityLog } from '@/types'
 
 interface TodaysTask extends ChecklistItem {
@@ -15,11 +15,44 @@ interface TodaysTask extends ChecklistItem {
   species: string
 }
 
+interface UpcomingEvent {
+  id: string
+  pet_id: string
+  pet_name: string
+  species: string
+  type: 'vet' | 'grooming' | 'vaccination'
+  title: string
+  date: string
+  time?: string | null
+  location?: string | null
+  notes?: string | null
+  statusLabel: string
+  isToday: boolean
+  isOverdue?: boolean
+}
+
+function getEventDateLabel(dateStr: string): { label: string; isToday: boolean; isPast: boolean } {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const target = new Date(y, m - 1, d)
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  target.setHours(0, 0, 0, 0)
+  const diffTime = target.getTime() - now.getTime()
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24))
+
+  if (diffDays === 0) return { label: 'Today', isToday: true, isPast: false }
+  if (diffDays === 1) return { label: 'Tomorrow', isToday: false, isPast: false }
+  if (diffDays === -1) return { label: 'Yesterday', isToday: false, isPast: true }
+  if (diffDays > 1) return { label: `In ${diffDays} days`, isToday: false, isPast: false }
+  return { label: `${Math.abs(diffDays)}d ago`, isToday: false, isPast: true }
+}
+
 export function DashboardPage() {
   const { family } = useFamily()
   const { user } = useAuth()
   const [pets, setPets] = useState<Pet[]>([])
   const [tasks, setTasks] = useState<TodaysTask[]>([])
+  const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
   const [activity, setActivity] = useState<ActivityLog[]>([])
   const [stats, setStats] = useState<{ total: number; completed: number }>({ total: 0, completed: 0 })
   const [loading, setLoading] = useState(true)
@@ -94,7 +127,12 @@ export function DashboardPage() {
 
     if (petsData && petsData.length > 0) {
       const petIds = petsData.map((p) => p.id)
-      const todayDateStr = new Date().toISOString().split('T')[0]
+      const today = new Date()
+      const todayDateStr = today.toISOString().split('T')[0]
+      const in7Days = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000)
+      const in7DaysDateStr = in7Days.toISOString().split('T')[0]
+      const past7Days = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+      const past7DaysDateStr = past7Days.toISOString().split('T')[0]
 
       // Fetch checklists
       const { data: checklists } = await supabase
@@ -110,18 +148,70 @@ export function DashboardPage() {
         })
         .map((c) => c.id)
 
-      // Fetch items, routines, and appointments today
-      const [itemsRes, routinesRes, apptsRes, vaxRes] = await Promise.all([
+      // Fetch items, routines, appointments today, and upcoming 7-day non-daily events
+      const [itemsRes, routinesRes, apptsRes, vaxRes, upcomingApptsRes, upcomingVaxRes] = await Promise.all([
         activeChecklistIds.length > 0
           ? supabase.from('checklist_items').select('*').in('checklist_id', activeChecklistIds)
           : Promise.resolve({ data: [] }),
         supabase.from('routines').select('*').in('pet_id', petIds),
         supabase.from('appointments').select('*').in('pet_id', petIds).eq('date', todayDateStr),
         supabase.from('vaccinations').select('*').in('pet_id', petIds).or(`next_due_date.eq.${todayDateStr},date_given.eq.${todayDateStr}`),
+        supabase.from('appointments').select('*').in('pet_id', petIds).gte('date', past7DaysDateStr).lte('date', in7DaysDateStr).order('date', { ascending: true }),
+        supabase.from('vaccinations').select('*').in('pet_id', petIds).not('next_due_date', 'is', null).gte('next_due_date', past7DaysDateStr).lte('next_due_date', in7DaysDateStr).order('next_due_date', { ascending: true }),
       ])
 
       const checklistMap = new Map((checklists as Checklist[] ?? []).map((c) => [c.id, c]))
       const petMap = new Map((petsData as Pet[]).map((p) => [p.id, p]))
+
+      // Process upcoming non-daily events (appointments & vaccinations)
+      const eventsList: UpcomingEvent[] = []
+
+      for (const a of (upcomingApptsRes.data ?? [])) {
+        const pet = petMap.get(a.pet_id)
+        const rel = getEventDateLabel(a.date)
+        eventsList.push({
+          id: `upcoming_appt_${a.id}`,
+          pet_id: a.pet_id,
+          pet_name: pet?.name || 'Pet',
+          species: pet?.species || '',
+          type: a.type,
+          title: a.title,
+          date: a.date,
+          time: a.time,
+          location: a.location,
+          notes: a.notes,
+          statusLabel: rel.label,
+          isToday: rel.isToday,
+          isOverdue: rel.isPast,
+        })
+      }
+
+      for (const v of (upcomingVaxRes.data ?? [])) {
+        const pet = petMap.get(v.pet_id)
+        const rel = getEventDateLabel(v.next_due_date!)
+        eventsList.push({
+          id: `upcoming_vax_${v.id}`,
+          pet_id: v.pet_id,
+          pet_name: pet?.name || 'Pet',
+          species: pet?.species || '',
+          type: 'vaccination',
+          title: `${v.vaccine_name} booster`,
+          date: v.next_due_date!,
+          time: '09:00',
+          notes: v.notes,
+          statusLabel: rel.label,
+          isToday: rel.isToday,
+          isOverdue: rel.isPast,
+        })
+      }
+
+      // Sort chronologically by date and time
+      eventsList.sort((a, b) => {
+        if (a.date !== b.date) return a.date.localeCompare(b.date)
+        return (a.time || '').localeCompare(b.time || '')
+      })
+
+      setUpcomingEvents(eventsList)
 
       // Fetch activity logs for today to sync daily completions across users/devices
       const { data: todayLogs } = await supabase
@@ -529,30 +619,106 @@ export function DashboardPage() {
           )}
         </div>
 
-        {/* Recent activity */}
-        <div className="card p-5">
-          <h2 className="text-base font-semibold text-gray-900 mb-4">Recent activity</h2>
-          {activity.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8">No activity yet</p>
-          ) : (
-            <div className="space-y-3">
-              {activity.map((log) => (
-                <div key={log.id} className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-full bg-primary-50 text-primary-600 flex items-center justify-center text-xs font-semibold flex-shrink-0">
-                    {log.user_email[0]?.toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-700">
-                      <span className="font-medium">{log.user_email.split('@')[0]}</span>{' '}
-                      {log.action === 'completed_task' ? 'completed' : log.action.replace(/_/g, ' ')}
-                      {log.details && <span className="text-gray-500"> {log.details}</span>}
-                    </p>
-                    <p className="text-xs text-gray-400">{relativeTime(log.created_at)}</p>
-                  </div>
-                </div>
-              ))}
+        {/* Right column: Upcoming non-daily events & Recent activity */}
+        <div className="space-y-6">
+          {/* Upcoming Events (non-daily) */}
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <CalIcon className="w-4 h-4 text-primary-600" />
+                <h2 className="text-base font-semibold text-gray-900">Upcoming events</h2>
+              </div>
+              <Link to="/app/calendar" className="text-xs text-primary-600 font-medium hover:underline flex items-center gap-1">
+                Calendar <ArrowRight className="w-3 h-3" />
+              </Link>
             </div>
-          )}
+
+            {upcomingEvents.length === 0 ? (
+              <div className="text-center py-6 px-3 bg-gray-50/60 rounded-xl border border-dashed border-gray-200">
+                <CalIcon className="w-6 h-6 text-gray-400 mx-auto mb-1.5" />
+                <p className="text-xs font-medium text-gray-600">No upcoming events</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">No vet visits or vaccines in the 7-day window.</p>
+                <Link to="/app/calendar" className="inline-block text-xs font-semibold text-primary-600 mt-2 hover:underline">
+                  + Schedule event
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {upcomingEvents.map((evt) => (
+                  <div
+                    key={evt.id}
+                    className={cn(
+                      'p-3 rounded-xl border transition-all flex items-start gap-3',
+                      evt.isToday
+                        ? 'border-primary-200 bg-primary-50/40 shadow-2xs'
+                        : evt.isOverdue
+                        ? 'border-amber-200 bg-amber-50/40'
+                        : 'border-gray-100 bg-gray-50/50 hover:bg-white hover:border-gray-200'
+                    )}
+                  >
+                    <div className="p-2 rounded-lg bg-white shadow-2xs text-base flex-shrink-0">
+                      {evt.type === 'vet' ? '🩺' : evt.type === 'grooming' ? '✂️' : '💉'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1 mb-0.5">
+                        <p className="text-xs font-semibold text-gray-900 truncate">
+                          {evt.title}
+                        </p>
+                        <span
+                          className={cn(
+                            'text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap',
+                            evt.isToday
+                              ? 'bg-primary-100 text-primary-700'
+                              : evt.isOverdue
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-gray-100 text-gray-600'
+                          )}
+                        >
+                          {evt.statusLabel}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                        <span>{speciesIcon(evt.species)} {evt.pet_name}</span>
+                        <span>•</span>
+                        <span>{formatDate(evt.date)}{evt.time ? ` at ${formatTime(evt.time)}` : ''}</span>
+                      </div>
+                      {evt.location && (
+                        <p className="text-[11px] text-gray-400 mt-0.5 truncate">
+                          📍 {evt.location}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Recent activity */}
+          <div className="card p-5">
+            <h2 className="text-base font-semibold text-gray-900 mb-4">Recent activity</h2>
+            {activity.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">No activity yet</p>
+            ) : (
+              <div className="space-y-3">
+                {activity.map((log) => (
+                  <div key={log.id} className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-primary-50 text-primary-600 flex items-center justify-center text-xs font-semibold flex-shrink-0">
+                      {log.user_email[0]?.toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-700">
+                        <span className="font-medium">{log.user_email.split('@')[0]}</span>{' '}
+                        {log.action === 'completed_task' ? 'completed' : log.action.replace(/_/g, ' ')}
+                        {log.details && <span className="text-gray-500"> {log.details}</span>}
+                      </p>
+                      <p className="text-xs text-gray-400">{relativeTime(log.created_at)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

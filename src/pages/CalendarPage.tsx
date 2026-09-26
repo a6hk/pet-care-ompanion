@@ -1,15 +1,14 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useFamily } from '@/context/FamilyContext'
 import { supabase } from '@/lib/supabase'
-import { Link } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Stethoscope, Scissors, Syringe, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Stethoscope, Scissors, Syringe } from 'lucide-react'
 import { formatTime, speciesIcon, cn } from '@/lib/utils'
-import type { Pet, Appointment, Vaccination, Routine } from '@/types'
+import type { Pet, Appointment, Vaccination } from '@/types'
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, format, isSameDay, isSameMonth, addMonths } from 'date-fns'
 
 interface CalendarEvent {
   date: string
-  type: 'vet' | 'grooming' | 'vaccination' | 'routine'
+  type: 'vet' | 'grooming' | 'vaccination'
   title: string
   pet_name: string
   species: string
@@ -37,7 +36,6 @@ export function CalendarPage() {
 
       const { data: appts } = await supabase.from('appointments').select('*').in('pet_id', petIds)
       const { data: vax } = await supabase.from('vaccinations').select('*').in('pet_id', petIds).not('next_due_date', 'is', null)
-      const { data: routines } = await supabase.from('routines').select('*').in('pet_id', petIds)
 
       const allEvents: CalendarEvent[] = []
 
@@ -57,16 +55,6 @@ export function CalendarPage() {
             pet_name: pet?.name ?? '', species: pet?.species ?? '', time: '09:00',
           })
         }
-      }
-
-      // Routines show on every day
-      for (const r of (routines as Routine[] ?? [])) {
-        const pet = petMap.get(r.pet_id)
-        allEvents.push({
-          date: format(new Date(), 'yyyy-MM-dd'), type: 'routine',
-          title: r.type === 'feeding' ? `Feeding ${r.portion || ''}` : 'Walk',
-          pet_name: pet?.name ?? '', species: pet?.species ?? '', time: r.time,
-        })
       }
 
       setEvents(allEvents)
@@ -100,14 +88,12 @@ export function CalendarPage() {
     vet: <Stethoscope className="w-3.5 h-3.5 text-secondary-600" />,
     grooming: <Scissors className="w-3.5 h-3.5 text-accent-600" />,
     vaccination: <Syringe className="w-3.5 h-3.5 text-success-600" />,
-    routine: <Clock className="w-3.5 h-3.5 text-primary-600" />,
   }
 
   const eventColors = {
     vet: 'bg-secondary-500',
     grooming: 'bg-accent-500',
     vaccination: 'bg-success-500',
-    routine: 'bg-primary-500',
   }
 
   if (loading) {
