@@ -9,6 +9,7 @@ import {
   ShieldCheck, HelpCircle, RefreshCw, PawPrint, Key, ExternalLink
 } from 'lucide-react'
 import { Modal } from '@/components/Modal'
+import { FormattedAIResponse } from '@/components/FormattedAIResponse'
 import { getPetConsultantResponse, type ChatMessage } from '@/lib/petConsultantAI'
 import { getGeminiApiKey, setGeminiApiKey, hasGeminiApiKey } from '@/lib/gemini'
 import { speciesIcon, cn } from '@/lib/utils'
@@ -354,10 +355,17 @@ Choose one of your registered pets above to get personalized advice, or click an
                 </div>
               </div>
 
-              {/* Message Content formatted with standard markdown parsing */}
-              <div className="whitespace-pre-line space-y-1.5 font-normal">
-                {msg.content}
-              </div>
+              {/* Message Content with Rich Markdown Formatting */}
+              {msg.role === 'assistant' ? (
+                <FormattedAIResponse
+                  content={msg.content}
+                  isEmergency={msg.isEmergency}
+                />
+              ) : (
+                <div className="whitespace-pre-wrap font-normal">
+                  {msg.content}
+                </div>
+              )}
 
               {/* Action buttons if assistant recommended actions */}
               {msg.suggestedActions && msg.suggestedActions.length > 0 && (
