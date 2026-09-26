@@ -14,14 +14,31 @@ export interface GeneratedChecklist {
  * Intelligent parser that extracts structured tasks, medications, dosages,
  * schedules, and follow-ups from raw veterinary notes or prescription text.
  */
+/**
+ * Intelligent parser that extracts structured tasks, medications, dosages,
+ * care instructions, schedules, and follow-ups from raw veterinary notes or prescription text.
+ */
 export function parseVetInstructionsToTasks(
   instructions: string,
   petName: string,
   species: string
 ): GeneratedChecklist {
   const cleanText = (instructions || '').trim()
-  const lines = cleanText
-    .split(/\r?\n|;|\.(?=\s+[A-Z0-9])/)
+  if (!cleanText) {
+    return {
+      title: `${petName}'s Vet Care & Medication Plan`,
+      items: [
+        { title: `💊 Medication: Administer prescribed medication for ${petName}`, due_time: '08:30' },
+        { title: `👁️ Care: Monitor ${petName}'s appetite and water intake`, due_time: '12:00' },
+        { title: `🩹 Care: Check incision / recovery site`, due_time: '19:00' },
+        { title: '🩺 Vet Visit: Schedule follow-up appointment with vet', due_time: null },
+      ],
+    }
+  }
+
+  // Split lines on linebreaks, semicolons, or numbered list indicators
+  const rawLines = cleanText
+    .split(/\r?\n|;/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0)
 
@@ -31,25 +48,65 @@ export function parseVetInstructionsToTasks(
   function detectTimes(text: string): string[] {
     const lower = text.toLowerCase()
 
-    if (lower.includes('twice daily') || lower.includes('twice a day') || lower.includes('2 times') || lower.includes('bid') || lower.includes('every 12 hours')) {
+    if (
+      lower.includes('twice daily') ||
+      lower.includes('twice a day') ||
+      lower.includes('2 times daily') ||
+      lower.includes('2 times a day') ||
+      lower.includes('bid') ||
+      lower.includes('b.i.d') ||
+      lower.includes('every 12 hours') ||
+      lower.includes('q12h') ||
+      lower.includes('morning and evening') ||
+      lower.includes('morning & evening') ||
+      lower.includes('morning and night')
+    ) {
       return ['08:00', '20:00']
     }
-    if (lower.includes('three times') || lower.includes('3 times') || lower.includes('tid') || lower.includes('every 8 hours')) {
+    if (
+      lower.includes('three times') ||
+      lower.includes('3 times') ||
+      lower.includes('tid') ||
+      lower.includes('t.i.d') ||
+      lower.includes('every 8 hours') ||
+      lower.includes('q8h')
+    ) {
       return ['08:00', '14:00', '20:00']
     }
-    if (lower.includes('morning and evening') || lower.includes('morning & evening')) {
-      return ['08:00', '19:00']
-    }
-    if (lower.includes('in the morning') || lower.includes('every morning') || lower.includes('with breakfast') || lower.includes('am')) {
+    if (
+      lower.includes('in the morning') ||
+      lower.includes('every morning') ||
+      lower.includes('with breakfast') ||
+      lower.includes('am dose') ||
+      lower.includes('morning dose')
+    ) {
       return ['08:30']
     }
-    if (lower.includes('in the evening') || lower.includes('at night') || lower.includes('before bed') || lower.includes('pm')) {
+    if (
+      lower.includes('in the evening') ||
+      lower.includes('at night') ||
+      lower.includes('before bed') ||
+      lower.includes('bedtime') ||
+      lower.includes('pm dose') ||
+      lower.includes('evening dose')
+    ) {
       return ['20:00']
     }
-    if (lower.includes('afternoon') || lower.includes('midday') || lower.includes('lunch')) {
+    if (
+      lower.includes('afternoon') ||
+      lower.includes('midday') ||
+      lower.includes('lunch')
+    ) {
       return ['13:00']
     }
-    if (lower.includes('once daily') || lower.includes('once a day') || lower.includes('daily')) {
+    if (
+      lower.includes('once daily') ||
+      lower.includes('once a day') ||
+      lower.includes('daily') ||
+      lower.includes('every 24 hours') ||
+      lower.includes('sid') ||
+      lower.includes('s.i.d')
+    ) {
       return ['09:00']
     }
 
@@ -67,52 +124,151 @@ export function parseVetInstructionsToTasks(
     return []
   }
 
-  // Iterate over extracted sentences or bullet points
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/^[-*•\d.)\s]+/, '').trim()
-    if (!line) continue
+  // Regex patterns to recognize section headers so they aren't added as tasks
+  const sectionHeaderRegex = /^(medications?|rx|prescription|care instructions?|discharge instructions?|post[- ]?op(?:erative)? care|instructions?|directions?|activity(?: restrictions?)?|wound care|diet(?:ary)?(?: instructions?)?|follow[- ]?up|re[- ]?check|warnings?|notes?):?$/i
 
-    const detected = detectTimes(line)
+  let currentCategory: 'medication' | 'care' | 'diet' | 'activity' | 'followup' | null = null
 
-    if (detected.length > 1) {
-      // Split into morning / evening or respective slots for clearer checklist tracking
-      if (detected.length === 2 && (detected[0] === '08:00' && detected[1] === '20:00')) {
+  // Known vet med keywords
+  const medKeywords = [
+    'amoxicillin', 'clavulanate', 'clavamox', 'meloxicam', 'metacam', 'gabapentin',
+    'carprofen', 'rimadyl', 'prednisone', 'prednisolone', 'cephalexin', 'tramadol',
+    'metronidazole', 'flagyl', 'apoquel', 'cerenia', 'bravecto', 'nexgard', 'heartgard',
+    'simparica', 'eye drop', 'ear drop', 'antibiotic', 'pain relief', 'probiotic',
+    'antihistamine', 'dewormer', 'omeprazole', 'famotidine', 'enrofloxacin', 'baytril',
+    'marbofloxacin', 'buprenorphine', 'clindamycin', 'doxycycline'
+  ]
+
+  // Dosage units regex: 500mg, 1 tab, 2 capsules, 0.5 ml, etc.
+  const dosageUnitRegex = /\b(\d+(?:\.\d+)?)\s*(mg|ml|mcg|cc|tab|tabs|tablets?|caps?|capsules?|drops?|chews?|pills?|puffs?)\b/i
+
+  for (const rawLine of rawLines) {
+    const stripped = rawLine.replace(/^[-*•\d.)\s]+/, '').trim()
+    if (!stripped) continue
+
+    // Check if this line is just a section header
+    if (sectionHeaderRegex.test(stripped)) {
+      const lower = stripped.toLowerCase()
+      if (lower.startsWith('med') || lower.startsWith('rx') || lower.startsWith('prescrip')) {
+        currentCategory = 'medication'
+      } else if (lower.includes('care') || lower.includes('wound') || lower.includes('post-op')) {
+        currentCategory = 'care'
+      } else if (lower.includes('diet')) {
+        currentCategory = 'diet'
+      } else if (lower.includes('activity')) {
+        currentCategory = 'activity'
+      } else if (lower.includes('follow') || lower.includes('re-check') || lower.includes('recheck')) {
+        currentCategory = 'followup'
+      }
+      continue
+    }
+
+    // Skip document titles, diagnosis lines or general hospital info lines
+    const lower = stripped.toLowerCase()
+    if (
+      lower.startsWith('patient:') ||
+      lower.startsWith('date:') ||
+      lower.startsWith('clinic:') ||
+      lower.startsWith('doctor:') ||
+      lower.startsWith('dvm:') ||
+      lower.startsWith('weight:') ||
+      lower.startsWith('owner:') ||
+      lower.includes('discharge') ||
+      ((lower.includes('prescription') || lower.includes('clinic')) &&
+        !lower.includes('give') &&
+        !lower.includes('tablet') &&
+        !lower.includes('drop') &&
+        !lower.includes('daily') &&
+        stripped.length <= 50) ||
+      lower.startsWith('[prescription image:')
+    ) {
+      continue
+    }
+
+    // Determine category of line
+    const isFollowUp = lower.includes('suture removal') || lower.includes('stitches removal') || lower.includes('staple removal') || lower.includes('re-check') || lower.includes('recheck') || lower.includes('return in') || lower.includes('follow-up') || currentCategory === 'followup'
+
+    const isMedication =
+      currentCategory === 'medication' ||
+      dosageUnitRegex.test(stripped) ||
+      medKeywords.some((med) => lower.includes(med)) ||
+      lower.includes('tablet') ||
+      lower.includes('capsule') ||
+      lower.includes('give 1') ||
+      lower.includes('give 2') ||
+      lower.includes('apply to affected') ||
+      lower.includes('drops into')
+
+    const isCollar = lower.includes('e-collar') || lower.includes('elizabethan') || lower.includes('cone')
+    const isActivity = lower.includes('crate') || lower.includes('cage rest') || lower.includes('no running') || lower.includes('no jumping') || lower.includes('leash walk only') || lower.includes('stairs') || currentCategory === 'activity'
+    const isWoundOrIncision = !isFollowUp && (lower.includes('incision') || lower.includes('suture') || lower.includes('stitches') || lower.includes('wound') || lower.includes('bandage') || lower.includes('clean site') || lower.includes('saline') || lower.includes('compress'))
+    const isDiet = lower.includes('bland diet') || lower.includes('boiled chicken') || lower.includes('white rice') || lower.includes('soft food') || lower.includes('small meals') || currentCategory === 'diet'
+
+    const detectedTimes = detectTimes(stripped)
+
+    // Format item prefix
+    let prefix = ''
+    if (isMedication) {
+      prefix = '💊 Medication: '
+    } else if (isFollowUp) {
+      prefix = '🩺 Vet Visit: '
+    } else if (isCollar) {
+      prefix = '🛡️ Care: '
+    } else if (isWoundOrIncision) {
+      prefix = '🩹 Care: '
+    } else if (isActivity) {
+      prefix = '🐾 Care: '
+    } else if (isDiet) {
+      prefix = '🥣 Care: '
+    } else {
+      prefix = '📋 Care: '
+    }
+
+    // Remove any existing emojis or duplicate prefix
+    const cleanContent = stripped
+      .replace(/^(?:💊|🩹|🛡️|🐾|🥣|🩺|📋|👁️)\s*/g, '')
+      .replace(/^(?:Medication|Care|Diet|Activity|Vet Visit|Follow[- ]Up):\s*/i, '')
+      .trim()
+
+    if (detectedTimes.length > 1) {
+      // Multiple doses per day
+      if (detectedTimes.length === 2 && detectedTimes[0] === '08:00' && detectedTimes[1] === '20:00') {
         items.push({
-          title: `${line} (Morning dose)`,
-          due_time: detected[0],
+          title: `${prefix}${cleanContent} (Morning)`,
+          due_time: detectedTimes[0],
         })
         items.push({
-          title: `${line} (Evening dose)`,
-          due_time: detected[1],
+          title: `${prefix}${cleanContent} (Evening)`,
+          due_time: detectedTimes[1],
         })
       } else {
-        detected.forEach((time, idx) => {
+        detectedTimes.forEach((time, idx) => {
           items.push({
-            title: `${line} (Dose ${idx + 1})`,
+            title: `${prefix}${cleanContent} (Slot ${idx + 1})`,
             due_time: time,
           })
         })
       }
     } else {
       items.push({
-        title: line,
-        due_time: detected.length === 1 ? detected[0] : null,
+        title: `${prefix}${cleanContent}`,
+        due_time: detectedTimes.length === 1 ? detectedTimes[0] : null,
       })
     }
   }
 
-  // If no lines were parsed or input was too brief, provide sensible medical defaults
+  // Fallback if no lines parsed
   if (items.length === 0) {
     items.push(
-      { title: `Administer prescribed medication for ${petName}`, due_time: '09:00' },
-      { title: `Monitor ${petName}'s appetite and water intake`, due_time: '12:00' },
-      { title: `Check incision / symptom recovery`, due_time: '19:00' },
-      { title: 'Schedule follow-up appointment with vet', due_time: null }
+      { title: `💊 Medication: Administer prescribed medication for ${petName}`, due_time: '08:30' },
+      { title: `👁️ Care: Monitor ${petName}'s appetite, hydration, and energy`, due_time: '12:00' },
+      { title: `🩹 Care: Check incision or recovery site`, due_time: '19:00' },
+      { title: '🩺 Vet Visit: Schedule follow-up appointment with vet', due_time: null }
     )
   }
 
   return {
-    title: `${petName}'s Vet Care & Medication Plan`,
+    title: `${petName}'s Prescription & Care Plan`,
     items,
   }
 }
@@ -232,7 +388,7 @@ export interface ExtractedPrescriptionDetails {
 
 /**
  * Intelligent parser that extracts multi-category care details (Medications,
- * Routines, Appointments, and Vaccinations) from a prescription image upload
+ * Care Instructions, Routines, Appointments, and Vaccinations) from a prescription image upload
  * or pasted veterinary notes.
  */
 export function parsePrescriptionImageAndText(
@@ -245,57 +401,142 @@ export function parsePrescriptionImageAndText(
   const combinedPrompt = `${text || ''} ${imageName ? `[Prescription Image: ${imageName}]` : ''}`.trim()
   const lower = combinedPrompt.toLowerCase()
   const todayStr = format(new Date(), 'yyyy-MM-dd')
-  const defaultChecklist = parseVetInstructionsToTasks(combinedPrompt, petName, species)
+  const defaultChecklist = parseVetInstructionsToTasks(text || '', petName, species)
 
-  // 1. Extract Routines if prescription mentions feeding/diet or specific walks/rest
+  // 1. Detect Course Duration (e.g. "for 10 days", "for 2 weeks", "7 days")
+  let checklistDuration = 7 // Default 7 days
+  const durationMatch = combinedPrompt.match(/(?:for|duration:?|give for|continue for)\s*(\d+)\s*(days?|weeks?)/i)
+  if (durationMatch) {
+    const num = parseInt(durationMatch[1], 10)
+    const unit = durationMatch[2].toLowerCase()
+    if (unit.startsWith('week')) {
+      checklistDuration = Math.min(num * 7, 90)
+    } else {
+      checklistDuration = Math.min(num, 90)
+    }
+  }
+
+  // 2. Extract Routines (Feeding / Diet and Leash Walking / Activity)
   const extractedRoutines: ExtractedPrescriptionDetails['extractedRoutines'] = []
-  if (lower.includes('feed') || lower.includes('diet') || lower.includes('soft food') || lower.includes('kibble') || lower.includes('bland diet')) {
+
+  // Feeding & Diet Routines
+  if (
+    lower.includes('feed') ||
+    lower.includes('diet') ||
+    lower.includes('soft food') ||
+    lower.includes('kibble') ||
+    lower.includes('bland diet') ||
+    lower.includes('chicken and rice') ||
+    lower.includes('boiled chicken')
+  ) {
+    const dietPortion = lower.includes('soft food')
+      ? 'Soft vet diet food'
+      : lower.includes('bland') || lower.includes('chicken')
+      ? 'Bland chicken & rice portion'
+      : 'Prescription diet portion'
+
     extractedRoutines.push({
       type: 'feeding',
       time: '08:00',
       label: 'Morning Special Vet Diet',
-      portion: lower.includes('soft food') ? 'Soft vet diet food' : lower.includes('bland') ? 'Bland chicken & rice' : 'Prescription diet portion',
-      notes: 'Feed as prescribed by veterinarian',
+      portion: dietPortion,
+      notes: 'Feed as prescribed by veterinarian (give with morning medication if required)',
     })
     extractedRoutines.push({
       type: 'feeding',
       time: '19:00',
       label: 'Evening Special Vet Diet',
-      portion: lower.includes('soft food') ? 'Soft vet diet food' : lower.includes('bland') ? 'Bland chicken & rice' : 'Prescription diet portion',
-      notes: 'Feed as prescribed by veterinarian',
+      portion: dietPortion,
+      notes: 'Feed as prescribed by veterinarian (give with evening medication if required)',
     })
   }
 
-  // 2. Extract Appointments if prescription mentions re-check, follow-up, or vet visit
+  // Walking & Activity Routines
+  if (
+    lower.includes('crate rest') ||
+    lower.includes('cage rest') ||
+    lower.includes('leash walk') ||
+    lower.includes('potty walk') ||
+    lower.includes('short walk') ||
+    lower.includes('no running') ||
+    lower.includes('no jumping')
+  ) {
+    extractedRoutines.push({
+      type: 'walking',
+      time: '07:30',
+      label: 'Morning Short Leash Potty Break',
+      portion: '5-10 min',
+      notes: 'Strict on-leash walk for elimination only. No running, jumping, or rough play.',
+    })
+    extractedRoutines.push({
+      type: 'walking',
+      time: '18:30',
+      label: 'Evening Short Leash Potty Break',
+      portion: '5-10 min',
+      notes: 'Strict on-leash walk for elimination only. Keep calm & quiet.',
+    })
+  }
+
+  // 3. Extract Follow-Up Appointment (Suture removal, re-check, vet visit)
   let extractedAppointment: ExtractedPrescriptionDetails['extractedAppointment'] = null
-  if (lower.includes('follow-up') || lower.includes('re-check') || lower.includes('recheck') || lower.includes('return in') || lower.includes('checkup') || lower.includes('vet visit') || lower.includes('weeks') || lower.includes('days')) {
+  const hasFollowUp =
+    lower.includes('follow-up') ||
+    lower.includes('follow up') ||
+    lower.includes('re-check') ||
+    lower.includes('recheck') ||
+    lower.includes('suture removal') ||
+    lower.includes('stitches removal') ||
+    lower.includes('staple removal') ||
+    lower.includes('return in') ||
+    lower.includes('re-examination') ||
+    lower.includes('vet visit')
+
+  if (hasFollowUp) {
     let daysAhead = 14 // default 2 weeks
-    if (lower.includes('1 week') || lower.includes('7 days')) daysAhead = 7
+
+    if (lower.includes('10-14 days') || lower.includes('10 to 14 days')) daysAhead = 12
+    else if (lower.includes('7-10 days') || lower.includes('7 to 10 days')) daysAhead = 8
+    else if (lower.includes('1 week') || lower.includes('7 days')) daysAhead = 7
     else if (lower.includes('3 days')) daysAhead = 3
+    else if (lower.includes('5 days')) daysAhead = 5
     else if (lower.includes('10 days')) daysAhead = 10
-    else if (lower.includes('1 month') || lower.includes('30 days')) daysAhead = 30
+    else if (lower.includes('2 weeks') || lower.includes('14 days')) daysAhead = 14
+    else if (lower.includes('3 weeks') || lower.includes('21 days')) daysAhead = 21
+    else if (lower.includes('1 month') || lower.includes('4 weeks') || lower.includes('30 days')) daysAhead = 30
+
+    const isSuture = lower.includes('suture') || lower.includes('stitch') || lower.includes('staple')
+    const apptTitle = isSuture
+      ? `${petName}'s Suture Removal & Vet Re-Check`
+      : `${petName}'s Vet Re-Check & Recovery Follow-Up`
 
     const apptDate = format(addDays(new Date(), daysAhead), 'yyyy-MM-dd')
 
     extractedAppointment = {
       type: 'vet',
-      title: `${petName}'s Vet Re-Check & Prescription Review`,
+      title: apptTitle,
       date: apptDate,
       time: '10:30',
       location: 'Veterinary Clinic',
-      notes: `Follow-up re-check for prescription evaluation (${imageName || 'Prescription notes'})`,
+      notes: `Veterinary post-prescription re-examination (${imageName || 'Prescription notes'})`,
     }
   }
 
-  // 3. Extract Vaccinations if mentioned
+  // 4. Extract Vaccinations if mentioned
   const extractedVaccinations: ExtractedPrescriptionDetails['extractedVaccinations'] = []
-  if (lower.includes('vaccin') || lower.includes('rabies') || lower.includes('booster') || lower.includes('dhpp') || lower.includes('fvrcp')) {
+  if (
+    lower.includes('vaccin') ||
+    lower.includes('rabies') ||
+    lower.includes('booster') ||
+    lower.includes('dhpp') ||
+    lower.includes('fvrcp') ||
+    lower.includes('bordetella')
+  ) {
     if (lower.includes('rabies')) {
       extractedVaccinations.push({
         vaccine_name: 'Rabies Booster',
         date_given: todayStr,
         next_due_date: format(addDays(new Date(), 365 * 3), 'yyyy-MM-dd'),
-        notes: 'Recorded from veterinary prescription/discharge record',
+        notes: 'Extracted from veterinary prescription/discharge record',
       })
     }
     if (lower.includes('dhpp') || lower.includes('fvrcp') || lower.includes('booster')) {
@@ -303,15 +544,23 @@ export function parsePrescriptionImageAndText(
         vaccine_name: species.toLowerCase().includes('cat') ? 'FVRCP Combo Booster' : 'DHPP Combo Booster',
         date_given: todayStr,
         next_due_date: format(addDays(new Date(), 365), 'yyyy-MM-dd'),
-        notes: 'Recorded from veterinary prescription/discharge record',
+        notes: 'Extracted from veterinary prescription/discharge record',
+      })
+    }
+    if (lower.includes('bordetella')) {
+      extractedVaccinations.push({
+        vaccine_name: 'Bordetella (Kennel Cough)',
+        date_given: todayStr,
+        next_due_date: format(addDays(new Date(), 365), 'yyyy-MM-dd'),
+        notes: 'Extracted from veterinary prescription/discharge record',
       })
     }
   }
 
   return {
-    checklistTitle: `${petName}'s Prescription & Medication Plan`,
+    checklistTitle: `${petName}'s Prescription & Care Plan`,
     checklistType: 'time_limited',
-    checklistDuration: 7,
+    checklistDuration,
     items: defaultChecklist.items,
     extractedRoutines,
     extractedAppointment,
