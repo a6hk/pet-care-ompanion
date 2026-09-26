@@ -6,12 +6,20 @@ import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, Plus, Trash2, CheckCircle2, Circle, Clock, Syringe, Stethoscope, Scissors,
   Calendar as CalIcon, PawPrint, Edit2, Sparkles, FileText, X, AlertTriangle, Loader2,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Check, ExternalLink, CalendarDays, HelpCircle, Utensils
 } from 'lucide-react'
 import { Modal } from '@/components/Modal'
 import { EmptyState } from '@/components/EmptyState'
 import { calculateAge, formatTime, formatDate, speciesIcon, cn } from '@/lib/utils'
-import { parseVetInstructionsToTasks, generateDefaultPetRoutine } from '@/lib/aiChecklistParser'
+import { parseVetInstructionsToTasks, generateSpecializedCareProgram } from '@/lib/aiChecklistParser'
+import {
+  parseNaturalLanguageRoutines,
+  parseNaturalLanguageAppointment,
+  parseNaturalLanguageVaccinations,
+  type ParsedRoutineSlot,
+  type ParsedAppointment,
+  type ParsedVaccination
+} from '@/lib/aiPetAssistant'
 import { PetFormModalContent, type PetFormData } from '@/components/PetFormModalContent'
 import type { Pet, Checklist, ChecklistItem, Routine, Appointment, Vaccination } from '@/types'
 
@@ -43,25 +51,24 @@ export function PetDetailPage() {
   const [checklists, setChecklists] = useState<Checklist[]>([])
   const [items, setItems] = useState<Record<string, ChecklistItem[]>>({})
   const [showAddChecklist, setShowAddChecklist] = useState(false)
-  const [showAI, setShowAI] = useState<'routine' | 'vet' | null>(null)
+  const [showAI, setShowAI] = useState<'vet' | 'program' | null>(null)
   const [aiInput, setAiInput] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiResult, setAiResult] = useState<{ title: string; items: { title: string; due_time: string | null }[] } | null>(null)
   const [editingItems, setEditingItems] = useState<{ title: string; due_time: string | null }[]>([])
   const [checklistTitle, setChecklistTitle] = useState('')
-  const [checklistType, setChecklistType] = useState<'recurring' | 'time_limited'>('recurring')
+  const [checklistType, setChecklistType] = useState<'recurring' | 'time_limited'>('time_limited')
   const [checklistDuration, setChecklistDuration] = useState('7')
   const [expandedChecklists, setExpandedChecklists] = useState<Record<string, boolean>>({})
 
   const toggleChecklistExpanded = (clId: string) => {
     setExpandedChecklists((prev) => ({
       ...prev,
-      // Default is collapsed (false), so clicking it flips undefined/false to true
       [clId]: !prev[clId],
     }))
   }
 
-  // Routine multi-slot state
+  // Routine state
   const [routines, setRoutines] = useState<Routine[]>([])
   const [showAddRoutine, setShowAddRoutine] = useState(false)
   const [routineType, setRoutineType] = useState<'feeding' | 'walking'>('feeding')
@@ -70,15 +77,33 @@ export function PetDetailPage() {
     { label: 'Dinner', time: '18:00', portion: '1 cup', notes: '' },
   ])
 
+  // AI Routine Assistant State
+  const [showAIRoutineModal, setShowAIRoutineModal] = useState(false)
+  const [aiRoutinePrompt, setAiRoutinePrompt] = useState('')
+  const [aiRoutineLoading, setAiRoutineLoading] = useState(false)
+  const [aiRoutineResults, setAiRoutineResults] = useState<ParsedRoutineSlot[] | null>(null)
+
   // Appointment state
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [showAddAppt, setShowAddAppt] = useState(false)
   const [apptForm, setApptForm] = useState({ type: 'vet' as 'vet' | 'grooming', title: '', date: '', time: '10:00', location: '', notes: '' })
 
+  // AI Appointment Assistant State
+  const [showAIApptModal, setShowAIApptModal] = useState(false)
+  const [aiApptPrompt, setAiApptPrompt] = useState('')
+  const [aiApptLoading, setAiApptLoading] = useState(false)
+  const [aiApptResult, setAiApptResult] = useState<ParsedAppointment | null>(null)
+
   // Vaccination state
   const [vaccinations, setVaccinations] = useState<Vaccination[]>([])
   const [showAddVax, setShowAddVax] = useState(false)
   const [vaxForm, setVaxForm] = useState({ vaccine_name: '', date_given: '', next_due_date: '', notes: '' })
+
+  // AI Vaccination Assistant State
+  const [showAIVaxModal, setShowAIVaxModal] = useState(false)
+  const [aiVaxPrompt, setAiVaxPrompt] = useState('')
+  const [aiVaxLoading, setAiVaxLoading] = useState(false)
+  const [aiVaxResults, setAiVaxResults] = useState<ParsedVaccination[] | null>(null)
 
   const [error, setError] = useState<string | null>(null)
 
@@ -220,7 +245,7 @@ export function PetDetailPage() {
     loadAll()
   }
 
-  async function generateAI(type: 'routine' | 'vet') {
+  async function generateAI(type: 'vet' | 'program') {
     if (!pet) return
     setAiLoading(true)
     setError(null)
@@ -228,54 +253,53 @@ export function PetDetailPage() {
     try {
       let result: { title: string; items: { title: string; due_time: string | null }[] } | null = null
 
-      // 1. Try calling the Supabase Edge Function if available
-      try {
-        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-checklist`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({
-            type,
-            petName: pet.name,
-            species: pet.species,
-            breed: pet.breed,
-            instructions: aiInput || undefined,
-          }),
-        })
+      if (type === 'vet') {
+        // Try edge function fallback to parser
+        try {
+          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-checklist`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+              type: 'vet',
+              petName: pet.name,
+              species: pet.species,
+              breed: pet.breed,
+              instructions: aiInput || undefined,
+            }),
+          })
 
-        if (response.ok) {
-          const data = await response.json()
-          if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-            result = {
-              title: data.title || (type === 'routine' ? `${pet.name}'s Daily Care` : `${pet.name}'s Vet Instructions`),
-              items: data.items.map((item: { title?: string; due_time?: string | null }) => ({
-                title: item.title || '',
-                due_time: item.due_time || null,
-              })),
+          if (response.ok) {
+            const data = await response.json()
+            if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+              result = {
+                title: data.title || `${pet.name}'s Vet & Medication Plan`,
+                items: data.items.map((item: { title?: string; due_time?: string | null }) => ({
+                  title: item.title || '',
+                  due_time: item.due_time || null,
+                })),
+              }
             }
           }
-        } else {
-          console.warn(`Edge function returned ${response.status}. Using smart client-side parser fallback.`)
+        } catch {
+          // fallback to client parser
         }
-      } catch (networkOrFuncErr) {
-        console.warn('Edge function unavailable, using client-side smart parser:', networkOrFuncErr)
-      }
 
-      // 2. If edge function was not deployed or returned no result, use the smart built-in analyzer
-      if (!result) {
-        if (type === 'vet') {
+        if (!result) {
           result = parseVetInstructionsToTasks(aiInput, pet.name, pet.species)
-        } else {
-          result = generateDefaultPetRoutine(pet.name, pet.species, pet.breed || undefined)
         }
+      } else {
+        // Specialized Care & Training Program
+        result = generateSpecializedCareProgram(pet.name, pet.species, 'general', aiInput)
       }
 
       setAiResult(result)
       setEditingItems(result.items)
       setChecklistTitle(result.title)
-      setChecklistType(type === 'routine' ? 'recurring' : 'time_limited')
+      setChecklistType(type === 'vet' ? 'time_limited' : 'recurring')
+      setChecklistDuration(type === 'vet' ? '7' : '14')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate checklist.')
     } finally {
@@ -283,7 +307,7 @@ export function PetDetailPage() {
     }
   }
 
-  async function saveChecklist(source: 'ai_routine' | 'ai_vet' | 'manual') {
+  async function saveChecklist(source: 'ai_vet' | 'ai_program' | 'manual') {
     if (!pet || !family || editingItems.length === 0) return
     setError(null)
 
@@ -337,7 +361,7 @@ export function PetDetailPage() {
     setAiResult(null)
     setEditingItems([])
     setChecklistTitle('')
-    setChecklistType('recurring')
+    setChecklistType('time_limited')
     setChecklistDuration('7')
     setError(null)
   }
@@ -386,6 +410,54 @@ export function PetDetailPage() {
     loadAll()
   }
 
+  // ===== AI Routine Assistant Handlers =====
+  async function handleGenerateAIRoutines() {
+    if (!pet) return
+    setAiRoutineLoading(true)
+    setError(null)
+    try {
+      const results = parseNaturalLanguageRoutines(aiRoutinePrompt, pet.name, pet.species)
+      setAiRoutineResults(results)
+    } catch (err: any) {
+      setError(err.message || 'Failed to parse routines.')
+    } finally {
+      setAiRoutineLoading(false)
+    }
+  }
+
+  async function handleSaveAIRoutines() {
+    if (!pet || !family || !aiRoutineResults || aiRoutineResults.length === 0) return
+    const valid = aiRoutineResults.filter((r) => r.time)
+    if (valid.length === 0) return
+
+    const rows = valid.map((s) => ({
+      pet_id: pet.id,
+      family_id: family.id,
+      type: s.type,
+      time: s.time,
+      portion: s.type === 'feeding' ? (s.portion || null) : null,
+      notes: [s.label, s.notes].filter(Boolean).join(' • ') || null,
+    }))
+
+    await supabase.from('routines').insert(rows)
+
+    if (user) {
+      await supabase.from('activity_log').insert({
+        family_id: family.id,
+        pet_id: pet.id,
+        user_id: user.id,
+        user_email: user.email || '',
+        action: 'created_routine',
+        details: `Added ${valid.length} routine(s) with AI for ${pet.name}`,
+      })
+    }
+
+    setShowAIRoutineModal(false)
+    setAiRoutinePrompt('')
+    setAiRoutineResults(null)
+    loadAll()
+  }
+
   // ===== Appointment handlers =====
   async function addAppointment() {
     if (!pet || !family) return
@@ -409,6 +481,51 @@ export function PetDetailPage() {
     loadAll()
   }
 
+  // ===== AI Appointment Assistant Handlers =====
+  async function handleGenerateAIAppt() {
+    if (!pet) return
+    setAiApptLoading(true)
+    setError(null)
+    try {
+      const result = parseNaturalLanguageAppointment(aiApptPrompt, pet.name, pet.species)
+      setAiApptResult(result)
+    } catch (err: any) {
+      setError(err.message || 'Failed to parse appointment.')
+    } finally {
+      setAiApptLoading(false)
+    }
+  }
+
+  async function handleSaveAIAppt() {
+    if (!pet || !family || !aiApptResult) return
+    await supabase.from('appointments').insert({
+      pet_id: pet.id,
+      family_id: family.id,
+      type: aiApptResult.type,
+      title: aiApptResult.title,
+      date: aiApptResult.date,
+      time: aiApptResult.time,
+      location: aiApptResult.location || null,
+      notes: aiApptResult.notes || null,
+    })
+
+    if (user) {
+      await supabase.from('activity_log').insert({
+        family_id: family.id,
+        pet_id: pet.id,
+        user_id: user.id,
+        user_email: user.email || '',
+        action: 'created_appointment',
+        details: `Scheduled ${aiApptResult.title} on ${aiApptResult.date} for ${pet.name}`,
+      })
+    }
+
+    setShowAIApptModal(false)
+    setAiApptPrompt('')
+    setAiApptResult(null)
+    loadAll()
+  }
+
   // ===== Vaccination handlers =====
   async function addVaccination() {
     if (!pet || !family) return
@@ -427,6 +544,54 @@ export function PetDetailPage() {
 
   async function deleteVaccination(id: string) {
     await supabase.from('vaccinations').delete().eq('id', id)
+    loadAll()
+  }
+
+  // ===== AI Vaccination Assistant Handlers =====
+  async function handleGenerateAIVax() {
+    if (!pet) return
+    setAiVaxLoading(true)
+    setError(null)
+    try {
+      const results = parseNaturalLanguageVaccinations(aiVaxPrompt, pet.name, pet.species)
+      setAiVaxResults(results)
+    } catch (err: any) {
+      setError(err.message || 'Failed to parse vaccinations.')
+    } finally {
+      setAiVaxLoading(false)
+    }
+  }
+
+  async function handleSaveAIVax() {
+    if (!pet || !family || !aiVaxResults || aiVaxResults.length === 0) return
+    const valid = aiVaxResults.filter((v) => v.vaccine_name && v.date_given)
+    if (valid.length === 0) return
+
+    const rows = valid.map((v) => ({
+      pet_id: pet.id,
+      family_id: family.id,
+      vaccine_name: v.vaccine_name,
+      date_given: v.date_given,
+      next_due_date: v.next_due_date || null,
+      notes: v.notes || null,
+    }))
+
+    await supabase.from('vaccinations').insert(rows)
+
+    if (user) {
+      await supabase.from('activity_log').insert({
+        family_id: family.id,
+        pet_id: pet.id,
+        user_id: user.id,
+        user_email: user.email || '',
+        action: 'created_vaccination',
+        details: `Logged ${valid.length} vaccination record(s) with AI for ${pet.name}`,
+      })
+    }
+
+    setShowAIVaxModal(false)
+    setAiVaxPrompt('')
+    setAiVaxResults(null)
     loadAll()
   }
 
@@ -452,8 +617,9 @@ export function PetDetailPage() {
   ]
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <Link to="/app/pets" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+    <div className="space-y-6 animate-fade-in max-w-5xl mx-auto">
+      {/* Back button */}
+      <Link to="/app/pets" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700">
         <ArrowLeft className="w-4 h-4" /> Back to pets
       </Link>
 
@@ -558,15 +724,37 @@ export function PetDetailPage() {
       {/* Checklists tab */}
       {tab === 'checklists' && (
         <div className="space-y-4 animate-fade-in">
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => { setShowAI('routine'); setAiInput(''); setAiResult(null); }} className="btn-accent">
-              <Sparkles className="w-4 h-4" /> AI Routine Checklist
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => {
+                setShowAI('vet')
+                setAiInput('')
+                setAiResult(null)
+              }}
+              className="btn-accent flex items-center gap-1.5 shadow-2xs"
+            >
+              <Sparkles className="w-4 h-4 text-amber-500" /> AI Vet & Medication Plan
             </button>
-            <button onClick={() => { setShowAI('vet'); setAiInput(''); setAiResult(null); }} className="btn-accent">
-              <Sparkles className="w-4 h-4" /> AI from Vet Notes
+            <button
+              onClick={() => {
+                setShowAI('program')
+                setAiInput('')
+                setAiResult(null)
+              }}
+              className="btn-accent flex items-center gap-1.5 shadow-2xs"
+            >
+              <Sparkles className="w-4 h-4 text-amber-500" /> AI Care & Training Program
             </button>
-            <button onClick={() => { setShowAddChecklist(true); setEditingItems([{ title: '', due_time: null }]); setChecklistTitle(''); setChecklistType('recurring'); }} className="btn-secondary">
-              <FileText className="w-4 h-4" /> Manual Checklist
+            <button
+              onClick={() => {
+                setShowAddChecklist(true)
+                setEditingItems([{ title: '', due_time: null }])
+                setChecklistTitle('')
+                setChecklistType('time_limited')
+              }}
+              className="btn-secondary flex items-center gap-1.5"
+            >
+              <FileText className="w-4 h-4 text-gray-500" /> Manual Checklist
             </button>
           </div>
 
@@ -575,7 +763,7 @@ export function PetDetailPage() {
               <EmptyState
                 icon={<CheckCircle2 className="w-10 h-10" />}
                 title="No checklists yet"
-                description="Generate an AI care checklist based on breed, convert vet instructions, or create your own manual checklist."
+                description="Generate an AI medication plan from vet notes, create a specialized training program, or build a custom checklist."
               />
             </div>
           ) : (
@@ -639,14 +827,12 @@ export function PetDetailPage() {
                             {cl.type === 'recurring' ? 'Recurring' : 'Time-limited'}
                           </span>
                           <span className="badge bg-gray-100 text-gray-600 text-xs">
-                            {cl.source === 'ai_routine'
-                              ? 'AI Routine'
-                              : cl.source === 'ai_vet'
-                              ? 'AI Vet'
-                              : 'Manual'}
+                            {cl.source.replace('ai_', 'AI ').replace('_', ' ')}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-400">
+                          {cl.start_date && <span>Starts {formatDate(cl.start_date)}</span>}
+                          {cl.end_date && <span>•</span>}
                           {cl.end_date && <span>Ends {formatDate(cl.end_date)}</span>}
                           {cl.end_date && <span>•</span>}
                           <span>{totalCount} {totalCount === 1 ? 'task' : 'tasks'}</span>
@@ -741,28 +927,45 @@ export function PetDetailPage() {
       {/* Routines tab */}
       {tab === 'routines' && (
         <div className="space-y-4 animate-fade-in">
-          <button onClick={() => setShowAddRoutine(true)} className="btn-primary">
-            <Plus className="w-4 h-4" /> Add routine
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => {
+                setAiRoutinePrompt('')
+                setAiRoutineResults(null)
+                setShowAIRoutineModal(true)
+              }}
+              className="btn-accent flex items-center gap-1.5 shadow-2xs"
+            >
+              <Sparkles className="w-4 h-4 text-amber-500" /> AI Routine Assistant
+            </button>
+            <button onClick={() => setShowAddRoutine(true)} className="btn-primary">
+              <Plus className="w-4 h-4" /> Add Routine
+            </button>
+          </div>
+
           {routines.length === 0 ? (
             <div className="card">
-              <EmptyState icon={<Clock className="w-10 h-10" />} title="No routines set" description="Add feeding or walking schedules to keep track of daily care times." />
+              <EmptyState
+                icon={<Clock className="w-10 h-10" />}
+                title="No routines set"
+                description="Use the AI Routine Assistant or manually add daily feeding and walking times."
+              />
             </div>
           ) : (
             <div className="grid sm:grid-cols-2 gap-3">
               {routines.map((r) => (
-                <div key={r.id} className="card p-4 flex items-center justify-between">
+                <div key={r.id} className="card p-4 flex items-center justify-between border border-gray-100 hover:shadow-xs transition-all">
                   <div className="flex items-center gap-3">
-                    <div className={cn('p-2 rounded-xl', r.type === 'feeding' ? 'bg-accent-50 text-accent-600' : 'bg-secondary-50 text-secondary-600')}>
+                    <div className={cn('p-2.5 rounded-xl shadow-2xs text-lg', r.type === 'feeding' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600')}>
                       {r.type === 'feeding' ? '🍽️' : '🦮'}
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900 capitalize">{r.type}</p>
-                      <p className="text-sm text-gray-500">{formatTime(r.time)}{r.portion ? ` • ${r.portion}` : ''}</p>
+                      <p className="font-bold text-gray-900 capitalize text-sm">{r.type}</p>
+                      <p className="text-xs text-gray-600 font-medium">{formatTime(r.time)}{r.portion ? ` • ${r.portion}` : ''}</p>
                       {r.notes && <p className="text-xs text-gray-400 mt-0.5">{r.notes}</p>}
                     </div>
                   </div>
-                  <button onClick={() => deleteRoutine(r.id)} className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors">
+                  <button onClick={() => deleteRoutine(r.id)} className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors" title="Delete routine">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -775,28 +978,45 @@ export function PetDetailPage() {
       {/* Appointments tab */}
       {tab === 'appointments' && (
         <div className="space-y-4 animate-fade-in">
-          <button onClick={() => setShowAddAppt(true)} className="btn-primary">
-            <Plus className="w-4 h-4" /> Add appointment
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => {
+                setAiApptPrompt('')
+                setAiApptResult(null)
+                setShowAIApptModal(true)
+              }}
+              className="btn-accent flex items-center gap-1.5 shadow-2xs"
+            >
+              <Sparkles className="w-4 h-4 text-amber-500" /> AI Schedule Assistant
+            </button>
+            <button onClick={() => setShowAddAppt(true)} className="btn-primary">
+              <Plus className="w-4 h-4" /> Add Appointment
+            </button>
+          </div>
+
           {appointments.length === 0 ? (
             <div className="card">
-              <EmptyState icon={<CalIcon className="w-10 h-10" />} title="No appointments" description="Schedule vet visits or grooming appointments to keep track of upcoming care." />
+              <EmptyState
+                icon={<CalIcon className="w-10 h-10" />}
+                title="No appointments"
+                description="Use the AI Schedule Assistant or add vet visits and grooming appointments."
+              />
             </div>
           ) : (
             <div className="space-y-3">
               {appointments.map((a) => (
-                <div key={a.id} className="card p-4 flex items-center justify-between">
+                <div key={a.id} className="card p-4 flex items-center justify-between border border-gray-100 hover:shadow-xs transition-all">
                   <div className="flex items-center gap-3">
-                    <div className={cn('p-2 rounded-xl', a.type === 'vet' ? 'bg-secondary-50 text-secondary-600' : 'bg-accent-50 text-accent-600')}>
+                    <div className={cn('p-2.5 rounded-xl shadow-2xs', a.type === 'vet' ? 'bg-secondary-50 text-secondary-600' : 'bg-accent-50 text-accent-600')}>
                       {a.type === 'vet' ? <Stethoscope className="w-5 h-5" /> : <Scissors className="w-5 h-5" />}
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">{a.title}</p>
-                      <p className="text-sm text-gray-500">{formatDate(a.date)} at {formatTime(a.time)}{a.location ? ` • ${a.location}` : ''}</p>
+                      <p className="font-bold text-gray-900 text-sm">{a.title}</p>
+                      <p className="text-xs text-gray-600 font-medium">{formatDate(a.date)} at {formatTime(a.time)}{a.location ? ` • ${a.location}` : ''}</p>
                       {a.notes && <p className="text-xs text-gray-400 mt-0.5">{a.notes}</p>}
                     </div>
                   </div>
-                  <button onClick={() => deleteAppointment(a.id)} className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors">
+                  <button onClick={() => deleteAppointment(a.id)} className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors" title="Delete appointment">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -809,33 +1029,50 @@ export function PetDetailPage() {
       {/* Vaccinations tab */}
       {tab === 'vaccinations' && (
         <div className="space-y-4 animate-fade-in">
-          <button onClick={() => setShowAddVax(true)} className="btn-primary">
-            <Plus className="w-4 h-4" /> Add vaccination record
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => {
+                setAiVaxPrompt('')
+                setAiVaxResults(null)
+                setShowAIVaxModal(true)
+              }}
+              className="btn-accent flex items-center gap-1.5 shadow-2xs"
+            >
+              <Sparkles className="w-4 h-4 text-amber-500" /> AI Vaccine Assistant
+            </button>
+            <button onClick={() => setShowAddVax(true)} className="btn-primary">
+              <Plus className="w-4 h-4" /> Add Vaccination Record
+            </button>
+          </div>
+
           {vaccinations.length === 0 ? (
             <div className="card">
-              <EmptyState icon={<Syringe className="w-10 h-10" />} title="No vaccination records" description="Log your pet's vaccinations to track when the next dose is due." />
+              <EmptyState
+                icon={<Syringe className="w-10 h-10" />}
+                title="No vaccination records"
+                description="Use the AI Vaccine Assistant or log pet vaccinations to track upcoming boosters."
+              />
             </div>
           ) : (
             <div className="space-y-3">
               {vaccinations.map((v) => (
-                <div key={v.id} className="card p-4 flex items-center justify-between">
+                <div key={v.id} className="card p-4 flex items-center justify-between border border-gray-100 hover:shadow-xs transition-all">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-success-50 text-success-600">
+                    <div className="p-2.5 rounded-xl bg-success-50 text-success-600 shadow-2xs">
                       <Syringe className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">{v.vaccine_name}</p>
-                      <p className="text-sm text-gray-500">Given: {formatDate(v.date_given)}</p>
+                      <p className="font-bold text-gray-900 text-sm">{v.vaccine_name}</p>
+                      <p className="text-xs text-gray-600 font-medium">Given: {formatDate(v.date_given)}</p>
                       {v.next_due_date && (
-                        <p className={cn('text-xs mt-0.5', new Date(v.next_due_date) < new Date() ? 'text-error-500 font-medium' : 'text-gray-400')}>
+                        <p className={cn('text-xs mt-0.5', new Date(v.next_due_date) < new Date() ? 'text-error-600 font-bold' : 'text-gray-400')}>
                           Next due: {formatDate(v.next_due_date)}
                         </p>
                       )}
                       {v.notes && <p className="text-xs text-gray-400 mt-0.5">{v.notes}</p>}
                     </div>
                   </div>
-                  <button onClick={() => deleteVaccination(v.id)} className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors">
+                  <button onClick={() => deleteVaccination(v.id)} className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500 transition-colors" title="Delete vaccination">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -845,98 +1082,818 @@ export function PetDetailPage() {
         </div>
       )}
 
-      {/* ===== AI Checklist Modal ===== */}
-      <Modal open={showAI !== null} onClose={resetChecklistForm} title={showAI === 'routine' ? 'AI Routine Checklist' : 'AI Checklist from Vet Notes'} size="lg">
+      {/* ===== AI Routine Assistant Modal ===== */}
+      <Modal
+        open={showAIRoutineModal}
+        onClose={() => {
+          setShowAIRoutineModal(false)
+          setAiRoutinePrompt('')
+          setAiRoutineResults(null)
+          setError(null)
+        }}
+        title={`AI Routine Assistant for ${pet.name}`}
+        size="lg"
+      >
         <div className="space-y-4">
-          {!aiResult && (
-            <>
-              <p className="text-sm text-gray-600">
-                {showAI === 'routine'
-                  ? `AI will suggest daily and monthly care items based on ${pet.name}'s species and breed. You can edit everything before saving.`
-                  : 'Paste your vet instructions or prescription below. AI will convert them into a step-by-step checklist.'}
+          {!aiRoutineResults ? (
+            <div className="space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Describe {pet.name}'s daily routine in natural language (e.g. feeding times, portions, walk lengths), or click a quick suggestion below to generate an ideal schedule for {pet.species}.
               </p>
-              {showAI === 'vet' && (
+
+              {/* Quick suggestions */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                  Quick Prompt Suggestions:
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    `Recommend a healthy daily feeding and walk schedule for ${pet.name}`,
+                    `Breakfast 1.5 cups at 8:00 AM, lunch potty break at 1:00 PM, evening walk 30m at 6:00 PM, dinner 1.5 cups at 7:30 PM`,
+                    `3 daily puppy meals (8:00 AM, 1:00 PM, 7:00 PM) with 1 cup each and 3 potty walks`,
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setAiRoutinePrompt(preset)}
+                      className="text-left text-xs p-2 rounded-xl bg-gray-50 hover:bg-primary-50 hover:text-primary-800 border border-gray-200/60 transition-colors"
+                    >
+                      💡 "{preset}"
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="label text-xs font-bold text-gray-700 uppercase">
+                  Tell AI what routine to add
+                </label>
+                <textarea
+                  value={aiRoutinePrompt}
+                  onChange={(e) => setAiRoutinePrompt(e.target.value)}
+                  className="input text-sm leading-relaxed"
+                  rows={4}
+                  placeholder={`e.g. ${pet.name} eats breakfast (1 cup) at 7:30 AM, gets a 30 min morning walk at 8:30 AM, and dinner (1 cup) at 6:30 PM...`}
+                />
+              </div>
+
+              {error && <div className="text-xs text-error-700 bg-error-50 border border-error-200 rounded-xl p-3">{error}</div>}
+
+              <button
+                type="button"
+                onClick={handleGenerateAIRoutines}
+                disabled={aiRoutineLoading}
+                className="btn-accent w-full py-3 text-sm font-bold flex items-center justify-center gap-2 shadow-sm"
+              >
+                {aiRoutineLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Analyzing & generating routines...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Generate Routine Schedule</span>
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
                 <div>
-                  <label className="label">Vet instructions / prescription</label>
-                  <textarea
-                    value={aiInput}
-                    onChange={(e) => setAiInput(e.target.value)}
-                    className="input"
-                    rows={6}
-                    placeholder="e.g. Give 1 tablet of Amoxicillin twice daily after meals for 7 days. Apply eye drops in the morning. No exercise for 3 days. Follow-up check in 1 week."
+                  <h4 className="text-sm font-bold text-gray-900">
+                    Review Generated Routines ({aiRoutineResults.length})
+                  </h4>
+                  <p className="text-xs text-gray-500">
+                    You can adjust any time, portion, or label before saving.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAiRoutineResults([
+                      ...aiRoutineResults,
+                      { type: 'feeding', time: '12:00', label: 'Midday Meal', portion: '1 cup', notes: '' },
+                    ])
+                  }
+                  className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> Add Slot
+                </button>
+              </div>
+
+              <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                {aiRoutineResults.map((slot, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl border border-gray-200/80 bg-gray-50/70 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAiRoutineResults(
+                              aiRoutineResults.map((s, i) =>
+                                i === idx ? { ...s, type: s.type === 'feeding' ? 'walking' : 'feeding' } : s
+                              )
+                            )
+                          }
+                          className={cn(
+                            'text-xs font-bold px-2 py-1 rounded-lg border transition-colors flex items-center gap-1',
+                            slot.type === 'feeding'
+                              ? 'bg-amber-100 text-amber-800 border-amber-300'
+                              : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                          )}
+                        >
+                          {slot.type === 'feeding' ? '🍽️ Feeding' : '🦮 Walking'} (Click to toggle)
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAiRoutineResults(aiRoutineResults.filter((_, i) => i !== idx))
+                        }
+                        className="p-1 text-gray-400 hover:text-error-600 rounded-lg transition-colors"
+                        title="Remove slot"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[10px] font-semibold text-gray-500 uppercase">Title / Meal</label>
+                        <input
+                          type="text"
+                          value={slot.label}
+                          onChange={(e) =>
+                            setAiRoutineResults(
+                              aiRoutineResults.map((s, i) => (i === idx ? { ...s, label: e.target.value } : s))
+                            )
+                          }
+                          className="input text-xs py-1.5"
+                          placeholder="e.g. Breakfast"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-gray-500 uppercase">Time</label>
+                        <input
+                          type="time"
+                          value={slot.time}
+                          onChange={(e) =>
+                            setAiRoutineResults(
+                              aiRoutineResults.map((s, i) => (i === idx ? { ...s, time: e.target.value } : s))
+                            )
+                          }
+                          className="input text-xs py-1.5"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-gray-500 uppercase">
+                          {slot.type === 'feeding' ? 'Portion' : 'Notes / Duration'}
+                        </label>
+                        <input
+                          type="text"
+                          value={slot.type === 'feeding' ? slot.portion || '' : slot.notes || ''}
+                          onChange={(e) =>
+                            setAiRoutineResults(
+                              aiRoutineResults.map((s, i) =>
+                                i === idx
+                                  ? slot.type === 'feeding'
+                                    ? { ...s, portion: e.target.value }
+                                    : { ...s, notes: e.target.value }
+                                  : s
+                              )
+                            )
+                          }
+                          className="input text-xs py-1.5"
+                          placeholder={slot.type === 'feeding' ? 'e.g. 1.5 cups' : 'e.g. 30 mins'}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {error && <div className="text-xs text-error-700 bg-error-50 border border-error-200 rounded-xl p-3">{error}</div>}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAiRoutineResults(null)}
+                  className="btn-secondary flex-1 text-xs py-2.5"
+                >
+                  Edit Prompt
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAIRoutines}
+                  disabled={aiRoutineResults.filter((s) => s.time).length === 0}
+                  className="btn-primary flex-1 text-xs py-2.5"
+                >
+                  Save {aiRoutineResults.length} Routines to {pet.name}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* ===== AI Appointment Assistant Modal ===== */}
+      <Modal
+        open={showAIApptModal}
+        onClose={() => {
+          setShowAIApptModal(false)
+          setAiApptPrompt('')
+          setAiApptResult(null)
+          setError(null)
+        }}
+        title={`AI Schedule Assistant for ${pet.name}`}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {!aiApptResult ? (
+            <div className="space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Tell AI about your upcoming vet visit or grooming session (e.g. doctor name, clinic, date, time). AI will extract and structure the calendar event.
+              </p>
+
+              {/* Quick suggestions */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                  Quick Suggestions:
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    `Annual wellness checkup with Dr. Miller at City Vet next Tuesday at 2:30 PM`,
+                    `Full grooming, bath and nail trim at Paws Spa this Friday at 10:00 AM`,
+                    `Dental cleaning and tartar removal at Greenfield Animal Hospital in 2 weeks at 9:00 AM`,
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setAiApptPrompt(preset)}
+                      className="text-left text-xs p-2 rounded-xl bg-gray-50 hover:bg-primary-50 hover:text-primary-800 border border-gray-200/60 transition-colors"
+                    >
+                      💡 "{preset}"
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="label text-xs font-bold text-gray-700 uppercase">
+                  Tell AI what appointment to schedule
+                </label>
+                <textarea
+                  value={aiApptPrompt}
+                  onChange={(e) => setAiApptPrompt(e.target.value)}
+                  className="input text-sm leading-relaxed"
+                  rows={4}
+                  placeholder={`e.g. Schedule ${pet.name}'s annual booster checkup with Dr. Smith at Banfield Vet next Wednesday at 3:00 PM...`}
+                />
+              </div>
+
+              {error && <div className="text-xs text-error-700 bg-error-50 border border-error-200 rounded-xl p-3">{error}</div>}
+
+              <button
+                type="button"
+                onClick={handleGenerateAIAppt}
+                disabled={aiApptLoading || !aiApptPrompt.trim()}
+                className="btn-accent w-full py-3 text-sm font-bold flex items-center justify-center gap-2 shadow-sm"
+              >
+                {aiApptLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Extracting appointment details...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Extract & Prepare Appointment</span>
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-3 bg-primary-50/70 rounded-xl border border-primary-100 text-xs text-primary-900">
+                <span className="font-bold">AI Extracted Details:</span> Verify or tweak the details below before scheduling into your family calendar.
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label text-xs font-semibold">Appointment Type</label>
+                  <select
+                    value={aiApptResult.type}
+                    onChange={(e) =>
+                      setAiApptResult({ ...aiApptResult, type: e.target.value as 'vet' | 'grooming' })
+                    }
+                    className="input text-xs"
+                  >
+                    <option value="vet">🩺 Vet Visit</option>
+                    <option value="grooming">✂️ Grooming</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label text-xs font-semibold">Event Title</label>
+                  <input
+                    type="text"
+                    value={aiApptResult.title}
+                    onChange={(e) => setAiApptResult({ ...aiApptResult, title: e.target.value })}
+                    className="input text-xs"
+                    required
                   />
                 </div>
-              )}
-              {showAI === 'routine' && (
-                <div className="bg-primary-50 rounded-xl p-4 text-sm text-gray-600">
-                  <p className="font-medium text-gray-700 mb-1">Pet info:</p>
-                  <p>Name: {pet.name} • Species: {pet.species} • Breed: {pet.breed || 'Not specified'}</p>
-                </div>
-              )}
-              {error && <div className="text-sm text-error-600 bg-error-50 rounded-lg px-4 py-3">{error}</div>}
-              <button onClick={() => showAI && generateAI(showAI)} disabled={aiLoading} className="btn-accent w-full">
-                {aiLoading ? 'Generating with AI...' : <><Sparkles className="w-4 h-4" /> Generate checklist</>}
-              </button>
-            </>
-          )}
-
-          {aiResult && (
-            <>
-              <div>
-                <label className="label">Checklist title</label>
-                <input value={checklistTitle} onChange={(e) => setChecklistTitle(e.target.value)} className="input" />
               </div>
-              {checklistType === 'time_limited' && (
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Duration (days)</label>
-                  <input type="number" value={checklistDuration} onChange={(e) => setChecklistDuration(e.target.value)} className="input" min="1" max="90" />
+                  <label className="label text-xs font-semibold">Date</label>
+                  <input
+                    type="date"
+                    value={aiApptResult.date}
+                    onChange={(e) => setAiApptResult({ ...aiApptResult, date: e.target.value })}
+                    className="input text-xs"
+                    required
+                  />
                 </div>
-              )}
+                <div>
+                  <label className="label text-xs font-semibold">Time</label>
+                  <input
+                    type="time"
+                    value={aiApptResult.time}
+                    onChange={(e) => setAiApptResult({ ...aiApptResult, time: e.target.value })}
+                    className="input text-xs"
+                    required
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="label">Items (editable)</label>
-                <div className="space-y-2">
+                <label className="label text-xs font-semibold">Location / Clinic</label>
+                <input
+                  type="text"
+                  value={aiApptResult.location}
+                  onChange={(e) => setAiApptResult({ ...aiApptResult, location: e.target.value })}
+                  className="input text-xs"
+                  placeholder="e.g. City Vet Hospital"
+                />
+              </div>
+
+              <div>
+                <label className="label text-xs font-semibold">Notes / Instructions</label>
+                <textarea
+                  value={aiApptResult.notes}
+                  onChange={(e) => setAiApptResult({ ...aiApptResult, notes: e.target.value })}
+                  className="input text-xs"
+                  rows={2}
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAiApptResult(null)}
+                  className="btn-secondary flex-1 text-xs py-2.5"
+                >
+                  Edit Prompt
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAIAppt}
+                  disabled={!aiApptResult.title || !aiApptResult.date}
+                  className="btn-primary flex-1 text-xs py-2.5"
+                >
+                  Schedule Appointment
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* ===== AI Vaccination Assistant Modal ===== */}
+      <Modal
+        open={showAIVaxModal}
+        onClose={() => {
+          setShowAIVaxModal(false)
+          setAiVaxPrompt('')
+          setAiVaxResults(null)
+          setError(null)
+        }}
+        title={`AI Vaccine Assistant for ${pet.name}`}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {!aiVaxResults ? (
+            <div className="space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Paste veterinary vaccine records or tell AI what vaccines {pet.name} received. AI will parse dates, calculate booster due dates, and create your records.
+              </p>
+
+              {/* Quick suggestions */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                  Quick Suggestions:
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    `Recommend core puppy/dog vaccines for ${pet.name} (${pet.species})`,
+                    `Rabies 3-year given today, next due in 3 years. Bordetella given today, due in 6 months for dog park`,
+                    `DHPP combo booster given on 2024-05-15, next due in 1 year`,
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setAiVaxPrompt(preset)}
+                      className="text-left text-xs p-2 rounded-xl bg-gray-50 hover:bg-primary-50 hover:text-primary-800 border border-gray-200/60 transition-colors"
+                    >
+                      💡 "{preset}"
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="label text-xs font-bold text-gray-700 uppercase">
+                  Paste records or describe vaccinations
+                </label>
+                <textarea
+                  value={aiVaxPrompt}
+                  onChange={(e) => setAiVaxPrompt(e.target.value)}
+                  className="input text-sm leading-relaxed"
+                  rows={4}
+                  placeholder={`e.g. ${pet.name} received Rabies shot on Oct 10 2024 (valid for 3 years) and Bordetella kennel cough vaccine due in 6 months...`}
+                />
+              </div>
+
+              {error && <div className="text-xs text-error-700 bg-error-50 border border-error-200 rounded-xl p-3">{error}</div>}
+
+              <button
+                type="button"
+                onClick={handleGenerateAIVax}
+                disabled={aiVaxLoading || !aiVaxPrompt.trim()}
+                className="btn-accent w-full py-3 text-sm font-bold flex items-center justify-center gap-2 shadow-sm"
+              >
+                {aiVaxLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Analyzing vaccine records...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Extract Vaccine Records</span>
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">
+                    Review Vaccine Records ({aiVaxResults.length})
+                  </h4>
+                  <p className="text-xs text-gray-500">
+                    Check dates and booster deadlines before saving.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAiVaxResults([
+                      ...aiVaxResults,
+                      {
+                        vaccine_name: 'Core Booster',
+                        date_given: new Date().toISOString().split('T')[0],
+                        next_due_date: new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0],
+                        notes: '',
+                      },
+                    ])
+                  }
+                  className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> Add Vaccine
+                </button>
+              </div>
+
+              <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                {aiVaxResults.map((vax, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl border border-gray-200/80 bg-gray-50/70 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="badge bg-success-50 text-success-700 border border-success-200 text-xs font-bold">
+                        💉 Vaccine #{idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAiVaxResults(aiVaxResults.filter((_, i) => i !== idx))
+                        }
+                        className="p-1 text-gray-400 hover:text-error-600 rounded-lg transition-colors"
+                        title="Remove vaccine"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="sm:col-span-1">
+                        <label className="text-[10px] font-semibold text-gray-500 uppercase">Vaccine Name</label>
+                        <input
+                          type="text"
+                          value={vax.vaccine_name}
+                          onChange={(e) =>
+                            setAiVaxResults(
+                              aiVaxResults.map((v, i) => (i === idx ? { ...v, vaccine_name: e.target.value } : v))
+                            )
+                          }
+                          className="input text-xs py-1.5"
+                          placeholder="e.g. Rabies"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-gray-500 uppercase">Date Given</label>
+                        <input
+                          type="date"
+                          value={vax.date_given}
+                          onChange={(e) =>
+                            setAiVaxResults(
+                              aiVaxResults.map((v, i) => (i === idx ? { ...v, date_given: e.target.value } : v))
+                            )
+                          }
+                          className="input text-xs py-1.5"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-gray-500 uppercase">Next Booster Due</label>
+                        <input
+                          type="date"
+                          value={vax.next_due_date}
+                          onChange={(e) =>
+                            setAiVaxResults(
+                              aiVaxResults.map((v, i) => (i === idx ? { ...v, next_due_date: e.target.value } : v))
+                            )
+                          }
+                          className="input text-xs py-1.5"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <input
+                        type="text"
+                        value={vax.notes}
+                        onChange={(e) =>
+                          setAiVaxResults(
+                            aiVaxResults.map((v, i) => (i === idx ? { ...v, notes: e.target.value } : v))
+                          )
+                        }
+                        className="input text-xs py-1.5"
+                        placeholder="Notes (optional, e.g. 3-year certificate tag #12345)"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {error && <div className="text-xs text-error-700 bg-error-50 border border-error-200 rounded-xl p-3">{error}</div>}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAiVaxResults(null)}
+                  className="btn-secondary flex-1 text-xs py-2.5"
+                >
+                  Edit Prompt
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAIVax}
+                  disabled={aiVaxResults.filter((v) => v.vaccine_name && v.date_given).length === 0}
+                  className="btn-primary flex-1 text-xs py-2.5"
+                >
+                  Save {aiVaxResults.length} Vaccine Records
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* ===== AI Checklist Modal (Vet & Program) ===== */}
+      <Modal
+        open={showAI !== null}
+        onClose={resetChecklistForm}
+        title={showAI === 'vet' ? 'AI Vet & Medication Plan' : 'AI Care & Training Program'}
+        size="lg"
+      >
+        <div className="space-y-4">
+          {!aiResult ? (
+            <div className="space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                {showAI === 'vet'
+                  ? `Paste vet discharge instructions, medication dosages, or prescription notes for ${pet.name}. AI will convert them into an actionable, step-by-step medication checklist.`
+                  : `Select or describe a specialized care plan (e.g. puppy potty training, post-surgery recovery, senior mobility, or travel checklist) for ${pet.name}.`}
+              </p>
+
+              {/* Quick suggestions */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                  Quick Suggestions:
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {showAI === 'vet' ? (
+                    [
+                      `Give 1 tablet Amoxicillin twice daily with meals for 7 days. Eye drops 2x daily. Rest for 3 days.`,
+                      `Ear drops 3 drops twice daily for 10 days. Clean ear canal gently before administration. Follow-up check in 2 weeks.`,
+                      `Post-dental antibiotics once daily in the morning for 5 days. Soft food only.`,
+                    ].map((preset, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setAiInput(preset)}
+                        className="text-left text-xs p-2 rounded-xl bg-gray-50 hover:bg-primary-50 hover:text-primary-800 border border-gray-200/60 transition-colors"
+                      >
+                        💡 "{preset}"
+                      </button>
+                    ))
+                  ) : (
+                    [
+                      `Puppy Crate & Potty Training Checklist`,
+                      `Post-Surgery Recovery & Wound Care Protocol`,
+                      `Senior Pet Mobility & Joint Care Plan`,
+                      `Pet Travel & Boarding Checklist`,
+                    ].map((preset, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setAiInput(preset)}
+                        className="text-left text-xs p-2 rounded-xl bg-gray-50 hover:bg-primary-50 hover:text-primary-800 border border-gray-200/60 transition-colors"
+                      >
+                        💡 "{preset}"
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="label text-xs font-bold text-gray-700 uppercase">
+                  {showAI === 'vet' ? 'Vet Instructions / Prescription' : 'Specialized Care / Training Goal'}
+                </label>
+                <textarea
+                  value={aiInput}
+                  onChange={(e) => setAiInput(e.target.value)}
+                  className="input text-sm leading-relaxed"
+                  rows={5}
+                  placeholder={
+                    showAI === 'vet'
+                      ? 'e.g. Give 1 tablet of Amoxicillin twice daily after meals for 7 days. Apply eye drops in the morning. No strenuous exercise for 3 days. Follow-up vet visit in 1 week...'
+                      : 'e.g. Create a comprehensive puppy crate training and potty schedule, or post-spay recovery plan...'
+                  }
+                />
+              </div>
+
+              {error && <div className="text-xs text-error-700 bg-error-50 border border-error-200 rounded-xl p-3">{error}</div>}
+
+              <button
+                onClick={() => showAI && generateAI(showAI)}
+                disabled={aiLoading || !aiInput.trim()}
+                className="btn-accent w-full py-3 text-sm font-bold flex items-center justify-center gap-2 shadow-sm"
+              >
+                {aiLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Structuring checklist with AI...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Generate Structured Checklist</span>
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="label text-xs font-semibold">Checklist Title</label>
+                <input
+                  value={checklistTitle}
+                  onChange={(e) => setChecklistTitle(e.target.value)}
+                  className="input text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label text-xs font-semibold">Checklist Mode</label>
+                  <select
+                    value={checklistType}
+                    onChange={(e) => setChecklistType(e.target.value as 'recurring' | 'time_limited')}
+                    className="input text-xs"
+                  >
+                    <option value="time_limited">Time-limited (e.g. 7-14 day course)</option>
+                    <option value="recurring">Recurring (ongoing daily program)</option>
+                  </select>
+                </div>
+                {checklistType === 'time_limited' && (
+                  <div>
+                    <label className="label text-xs font-semibold">Duration (days)</label>
+                    <input
+                      type="number"
+                      value={checklistDuration}
+                      onChange={(e) => setChecklistDuration(e.target.value)}
+                      className="input text-xs"
+                      min="1"
+                      max="90"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="label text-xs font-semibold mb-0">Checklist Tasks ({editingItems.length})</label>
+                  <button
+                    type="button"
+                    onClick={() => setEditingItems([...editingItems, { title: '', due_time: null }])}
+                    className="btn-ghost text-xs text-primary-600 py-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add item
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {editingItems.map((item, idx) => (
-                    <div key={idx} className="flex gap-2">
+                    <div key={idx} className="flex items-center gap-2 p-2 rounded-xl bg-gray-50 border border-gray-100">
                       <input
                         value={item.title}
-                        onChange={(e) => setEditingItems(editingItems.map((it, i) => i === idx ? { ...it, title: e.target.value } : it))}
-                        className="input flex-1"
-                        placeholder="Item description"
+                        onChange={(e) =>
+                          setEditingItems(
+                            editingItems.map((it, i) => (i === idx ? { ...it, title: e.target.value } : it))
+                          )
+                        }
+                        className="input text-xs flex-1 py-1.5"
+                        placeholder="Task description"
                       />
                       <input
                         type="time"
                         value={item.due_time || ''}
-                        onChange={(e) => setEditingItems(editingItems.map((it, i) => i === idx ? { ...it, due_time: e.target.value || null } : it))}
-                        className="input w-32"
+                        onChange={(e) =>
+                          setEditingItems(
+                            editingItems.map((it, i) => (i === idx ? { ...it, due_time: e.target.value || null } : it))
+                          )
+                        }
+                        className="input text-xs w-28 py-1.5"
                       />
                       <button
+                        type="button"
                         onClick={() => setEditingItems(editingItems.filter((_, i) => i !== idx))}
-                        className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500"
+                        className="p-1.5 text-gray-400 hover:text-error-600 rounded-lg transition-colors"
+                        title="Remove item"
                       >
                         <X className="w-4 h-4" />
                       </button>
                     </div>
                   ))}
                 </div>
-                <button
-                  onClick={() => setEditingItems([...editingItems, { title: '', due_time: null }])}
-                  className="btn-ghost mt-2 text-sm"
-                >
-                  <Plus className="w-4 h-4" /> Add item
-                </button>
               </div>
-              {error && <div className="text-sm text-error-600 bg-error-50 rounded-lg px-4 py-3">{error}</div>}
-              <div className="flex gap-3">
-                <button onClick={() => { setAiResult(null); setEditingItems([]); }} className="btn-secondary flex-1">Start over</button>
+
+              {error && <div className="text-xs text-error-700 bg-error-50 border border-error-200 rounded-xl p-3">{error}</div>}
+
+              <div className="flex gap-2 pt-2">
                 <button
-                  onClick={() => saveChecklist(showAI === 'routine' ? 'ai_routine' : 'ai_vet')}
+                  type="button"
+                  onClick={() => {
+                    setAiResult(null)
+                    setEditingItems([])
+                  }}
+                  className="btn-secondary flex-1 text-xs py-2.5"
+                >
+                  Edit Prompt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => saveChecklist(showAI === 'vet' ? 'ai_vet' : 'ai_program')}
                   disabled={editingItems.filter((i) => i.title.trim()).length === 0}
-                  className="btn-primary flex-1"
+                  className="btn-primary flex-1 text-xs py-2.5"
                 >
-                  Save checklist
+                  Save Checklist to {pet.name}
                 </button>
               </div>
-            </>
+            </div>
           )}
         </div>
       </Modal>
@@ -945,102 +1902,142 @@ export function PetDetailPage() {
       <Modal open={showAddChecklist} onClose={resetChecklistForm} title="Create manual checklist" size="lg">
         <div className="space-y-4">
           <div>
-            <label className="label">Checklist title</label>
-            <input value={checklistTitle} onChange={(e) => setChecklistTitle(e.target.value)} className="input" placeholder="e.g. Evening care routine" />
+            <label className="label text-xs font-semibold">Checklist title</label>
+            <input
+              value={checklistTitle}
+              onChange={(e) => setChecklistTitle(e.target.value)}
+              className="input text-xs"
+              placeholder="e.g. Evening care routine"
+            />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label">Type</label>
-              <select value={checklistType} onChange={(e) => setChecklistType(e.target.value as 'recurring' | 'time_limited')} className="input">
+              <label className="label text-xs font-semibold">Type</label>
+              <select
+                value={checklistType}
+                onChange={(e) => setChecklistType(e.target.value as 'recurring' | 'time_limited')}
+                className="input text-xs"
+              >
+                <option value="time_limited">Time-limited (e.g. medication)</option>
                 <option value="recurring">Recurring (daily/monthly)</option>
-                <option value="time_limited">Time-limited</option>
               </select>
             </div>
             {checklistType === 'time_limited' && (
               <div>
-                <label className="label">Duration (days)</label>
-                <input type="number" value={checklistDuration} onChange={(e) => setChecklistDuration(e.target.value)} className="input" min="1" max="90" />
+                <label className="label text-xs font-semibold">Duration (days)</label>
+                <input
+                  type="number"
+                  value={checklistDuration}
+                  onChange={(e) => setChecklistDuration(e.target.value)}
+                  className="input text-xs"
+                  min="1"
+                  max="90"
+                />
               </div>
             )}
           </div>
           <div>
-            <label className="label">Items</label>
-            <div className="space-y-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="label text-xs font-semibold mb-0">Items ({editingItems.length})</label>
+              <button
+                type="button"
+                onClick={() => setEditingItems([...editingItems, { title: '', due_time: null }])}
+                className="btn-ghost text-xs text-primary-600 py-1"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add item
+              </button>
+            </div>
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
               {editingItems.map((item, idx) => (
-                <div key={idx} className="flex gap-2">
+                <div key={idx} className="flex items-center gap-2 p-2 rounded-xl bg-gray-50 border border-gray-100">
                   <input
                     value={item.title}
-                    onChange={(e) => setEditingItems(editingItems.map((it, i) => i === idx ? { ...it, title: e.target.value } : it))}
-                    className="input flex-1"
+                    onChange={(e) =>
+                      setEditingItems(
+                        editingItems.map((it, i) => (i === idx ? { ...it, title: e.target.value } : it))
+                      )
+                    }
+                    className="input text-xs flex-1 py-1.5"
                     placeholder="Item description"
                   />
                   <input
                     type="time"
                     value={item.due_time || ''}
-                    onChange={(e) => setEditingItems(editingItems.map((it, i) => i === idx ? { ...it, due_time: e.target.value || null } : it))}
-                    className="input w-32"
+                    onChange={(e) =>
+                      setEditingItems(
+                        editingItems.map((it, i) => (i === idx ? { ...it, due_time: e.target.value || null } : it))
+                      )
+                    }
+                    className="input text-xs w-28 py-1.5"
                   />
                   <button
+                    type="button"
                     onClick={() => setEditingItems(editingItems.filter((_, i) => i !== idx))}
-                    className="p-2 rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-500"
+                    className="p-1.5 text-gray-400 hover:text-error-600 rounded-lg transition-colors"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               ))}
             </div>
-            <button onClick={() => setEditingItems([...editingItems, { title: '', due_time: null }])} className="btn-ghost mt-2 text-sm">
-              <Plus className="w-4 h-4" /> Add item
-            </button>
           </div>
-          {error && <div className="text-sm text-error-600 bg-error-50 rounded-lg px-4 py-3">{error}</div>}
+          {error && <div className="text-xs text-error-700 bg-error-50 border border-error-200 rounded-xl p-3">{error}</div>}
           <button
             onClick={() => saveChecklist('manual')}
-            disabled={editingItems.filter((i) => i.title.trim()).length === 0 || !checklistTitle}
-            className="btn-primary w-full"
+            disabled={!checklistTitle || editingItems.filter((i) => i.title.trim()).length === 0}
+            className="btn-primary w-full text-xs py-2.5"
           >
-            Save checklist
+            Create checklist
           </button>
         </div>
       </Modal>
 
-      {/* ===== Routine Multi-Slot Modal ===== */}
-      <Modal open={showAddRoutine} onClose={() => setShowAddRoutine(false)} title="Setup daily routine" size="lg">
+      {/* ===== Manual Routine Modal ===== */}
+      <Modal open={showAddRoutine} onClose={() => setShowAddRoutine(false)} title="Add daily routine" size="lg">
         <div className="space-y-5">
           {/* Routine Type Selector */}
           <div>
-            <label className="label">Activity type</label>
+            <label className="label">Routine Type</label>
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => switchRoutineType('feeding')}
                 className={cn(
-                  'flex items-center justify-center gap-2 p-3 rounded-xl border text-sm font-semibold transition-all',
+                  'p-3.5 rounded-2xl border text-left transition-all flex items-center gap-3',
                   routineType === 'feeding'
-                    ? 'border-primary-500 bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-500'
-                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    ? 'border-primary-500 bg-primary-50/50 text-primary-950 font-semibold ring-2 ring-primary-500/20'
+                    : 'border-gray-200 hover:bg-gray-50 text-gray-700'
                 )}
               >
-                <span className="text-lg">🍽️</span> Feeding
+                <div className="p-2 rounded-xl bg-accent-50 text-accent-600 text-lg">🍽️</div>
+                <div>
+                  <p className="text-sm font-bold">Feeding Schedule</p>
+                  <p className="text-xs text-gray-500">Set meals, portions & times</p>
+                </div>
               </button>
+
               <button
                 type="button"
                 onClick={() => switchRoutineType('walking')}
                 className={cn(
-                  'flex items-center justify-center gap-2 p-3 rounded-xl border text-sm font-semibold transition-all',
+                  'p-3.5 rounded-2xl border text-left transition-all flex items-center gap-3',
                   routineType === 'walking'
-                    ? 'border-secondary-500 bg-secondary-50 text-secondary-700 shadow-sm ring-1 ring-secondary-500'
-                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    ? 'border-primary-500 bg-primary-50/50 text-primary-950 font-semibold ring-2 ring-primary-500/20'
+                    : 'border-gray-200 hover:bg-gray-50 text-gray-700'
                 )}
               >
-                <span className="text-lg">🦮</span> Walking
+                <div className="p-2 rounded-xl bg-secondary-50 text-secondary-600 text-lg">🦮</div>
+                <div>
+                  <p className="text-sm font-bold">Walking Schedule</p>
+                  <p className="text-xs text-gray-500">Daily walks & exercise breaks</p>
+                </div>
               </button>
             </div>
           </div>
 
-          {/* Quick preset buttons */}
+          {/* Preset Buttons */}
           <div>
-            <label className="label">Quick presets</label>
+            <label className="label">Quick Preset</label>
             <div className="flex flex-wrap gap-2">
               {routineType === 'feeding' ? (
                 <>
@@ -1052,30 +2049,18 @@ export function PetDetailPage() {
                     ])}
                     className="btn-secondary text-xs py-1.5 px-3"
                   >
-                    2x Daily (Breakfast, Dinner)
+                    2x Daily (Breakfast & Dinner)
                   </button>
                   <button
                     type="button"
                     onClick={() => setRoutineSlots([
-                      { label: 'Breakfast', time: '08:00', portion: '3/4 cup', notes: '' },
-                      { label: 'Lunch', time: '13:00', portion: '1/2 cup', notes: '' },
-                      { label: 'Dinner', time: '19:00', portion: '3/4 cup', notes: '' },
+                      { label: 'Breakfast', time: '07:30', portion: '1 cup', notes: '' },
+                      { label: 'Lunch', time: '13:00', portion: '0.5 cup', notes: '' },
+                      { label: 'Dinner', time: '19:00', portion: '1 cup', notes: '' },
                     ])}
                     className="btn-secondary text-xs py-1.5 px-3"
                   >
-                    3x Daily (Breakfast, Lunch, Dinner)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRoutineSlots([
-                      { label: 'Breakfast', time: '08:00', portion: '1/2 cup', notes: '' },
-                      { label: 'Lunch', time: '12:30', portion: '1/2 cup', notes: '' },
-                      { label: 'Dinner', time: '17:30', portion: '1/2 cup', notes: '' },
-                      { label: 'Night snack', time: '21:00', portion: 'small treat', notes: '' },
-                    ])}
-                    className="btn-secondary text-xs py-1.5 px-3"
-                  >
-                    4x Daily (with Snacks)
+                    3x Daily (Breakfast, Lunch & Dinner)
                   </button>
                 </>
               ) : (
@@ -1094,8 +2079,8 @@ export function PetDetailPage() {
                     type="button"
                     onClick={() => setRoutineSlots([
                       { label: 'Morning walk', time: '07:00', portion: '', notes: '25 mins' },
-                      { label: 'Mid-day walk', time: '13:00', portion: '', notes: '15 mins' },
-                      { label: 'Evening walk', time: '19:00', portion: '', notes: '30 mins' },
+                      { label: 'Midday potty', time: '13:00', portion: '', notes: '10 mins' },
+                      { label: 'Evening walk', time: '18:30', portion: '', notes: '35 mins' },
                     ])}
                     className="btn-secondary text-xs py-1.5 px-3"
                   >
@@ -1208,36 +2193,36 @@ export function PetDetailPage() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label">Type</label>
-              <select value={apptForm.type} onChange={(e) => setApptForm({ ...apptForm, type: e.target.value as 'vet' | 'grooming' })} className="input">
+              <label className="label text-xs font-semibold">Type</label>
+              <select value={apptForm.type} onChange={(e) => setApptForm({ ...apptForm, type: e.target.value as 'vet' | 'grooming' })} className="input text-xs">
                 <option value="vet">Vet</option>
                 <option value="grooming">Grooming</option>
               </select>
             </div>
             <div>
-              <label className="label">Title</label>
-              <input value={apptForm.title} onChange={(e) => setApptForm({ ...apptForm, title: e.target.value })} className="input" placeholder="e.g. Annual checkup" />
+              <label className="label text-xs font-semibold">Title</label>
+              <input value={apptForm.title} onChange={(e) => setApptForm({ ...apptForm, title: e.target.value })} className="input text-xs" placeholder="e.g. Annual checkup" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label">Date</label>
-              <input type="date" value={apptForm.date} onChange={(e) => setApptForm({ ...apptForm, date: e.target.value })} className="input" />
+              <label className="label text-xs font-semibold">Date</label>
+              <input type="date" value={apptForm.date} onChange={(e) => setApptForm({ ...apptForm, date: e.target.value })} className="input text-xs" />
             </div>
             <div>
-              <label className="label">Time</label>
-              <input type="time" value={apptForm.time} onChange={(e) => setApptForm({ ...apptForm, time: e.target.value })} className="input" />
+              <label className="label text-xs font-semibold">Time</label>
+              <input type="time" value={apptForm.time} onChange={(e) => setApptForm({ ...apptForm, time: e.target.value })} className="input text-xs" />
             </div>
           </div>
           <div>
-            <label className="label">Location</label>
-            <input value={apptForm.location} onChange={(e) => setApptForm({ ...apptForm, location: e.target.value })} className="input" placeholder="e.g. Greenfield Vet Clinic" />
+            <label className="label text-xs font-semibold">Location</label>
+            <input value={apptForm.location} onChange={(e) => setApptForm({ ...apptForm, location: e.target.value })} className="input text-xs" placeholder="e.g. Greenfield Vet Clinic" />
           </div>
           <div>
-            <label className="label">Notes</label>
-            <textarea value={apptForm.notes} onChange={(e) => setApptForm({ ...apptForm, notes: e.target.value })} className="input" rows={2} />
+            <label className="label text-xs font-semibold">Notes</label>
+            <textarea value={apptForm.notes} onChange={(e) => setApptForm({ ...apptForm, notes: e.target.value })} className="input text-xs" rows={2} />
           </div>
-          <button onClick={addAppointment} disabled={!apptForm.title || !apptForm.date} className="btn-primary w-full">Add appointment</button>
+          <button onClick={addAppointment} disabled={!apptForm.title || !apptForm.date} className="btn-primary w-full text-xs py-2.5">Add appointment</button>
         </div>
       </Modal>
 
@@ -1245,24 +2230,24 @@ export function PetDetailPage() {
       <Modal open={showAddVax} onClose={() => setShowAddVax(false)} title="Add vaccination record">
         <div className="space-y-4">
           <div>
-            <label className="label">Vaccine name</label>
-            <input value={vaxForm.vaccine_name} onChange={(e) => setVaxForm({ ...vaxForm, vaccine_name: e.target.value })} className="input" placeholder="e.g. Rabies" />
+            <label className="label text-xs font-semibold">Vaccine name</label>
+            <input value={vaxForm.vaccine_name} onChange={(e) => setVaxForm({ ...vaxForm, vaccine_name: e.target.value })} className="input text-xs" placeholder="e.g. Rabies" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label">Date given</label>
-              <input type="date" value={vaxForm.date_given} onChange={(e) => setVaxForm({ ...vaxForm, date_given: e.target.value })} className="input" />
+              <label className="label text-xs font-semibold">Date given</label>
+              <input type="date" value={vaxForm.date_given} onChange={(e) => setVaxForm({ ...vaxForm, date_given: e.target.value })} className="input text-xs" />
             </div>
             <div>
-              <label className="label">Next due date</label>
-              <input type="date" value={vaxForm.next_due_date} onChange={(e) => setVaxForm({ ...vaxForm, next_due_date: e.target.value })} className="input" />
+              <label className="label text-xs font-semibold">Next due date</label>
+              <input type="date" value={vaxForm.next_due_date} onChange={(e) => setVaxForm({ ...vaxForm, next_due_date: e.target.value })} className="input text-xs" />
             </div>
           </div>
           <div>
-            <label className="label">Notes</label>
-            <textarea value={vaxForm.notes} onChange={(e) => setVaxForm({ ...vaxForm, notes: e.target.value })} className="input" rows={2} />
+            <label className="label text-xs font-semibold">Notes</label>
+            <textarea value={vaxForm.notes} onChange={(e) => setVaxForm({ ...vaxForm, notes: e.target.value })} className="input text-xs" rows={2} />
           </div>
-          <button onClick={addVaccination} disabled={!vaxForm.vaccine_name || !vaxForm.date_given} className="btn-primary w-full">Add record</button>
+          <button onClick={addVaccination} disabled={!vaxForm.vaccine_name || !vaxForm.date_given} className="btn-primary w-full text-xs py-2.5">Add record</button>
         </div>
       </Modal>
 

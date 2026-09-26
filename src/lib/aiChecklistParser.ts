@@ -116,47 +116,86 @@ export function parseVetInstructionsToTasks(
 }
 
 /**
- * Intelligent species & breed routine generator fallback
+ * Intelligent generator for specialized care programs:
+ * puppy training, senior wellness, post-surgery, travel/boarding.
  */
-export function generateDefaultPetRoutine(
+export function generateSpecializedCareProgram(
   petName: string,
   species: string,
-  breed?: string
+  programType: 'training' | 'senior' | 'post_surgery' | 'travel' | 'general',
+  customPrompt?: string
 ): GeneratedChecklist {
   const isDog = species.toLowerCase().includes('dog')
-  const isCat = species.toLowerCase().includes('cat')
+  const promptLower = (customPrompt || '').toLowerCase()
 
-  const items: GeneratedChecklistItem[] = isDog
-    ? [
-        { title: `Morning walk & bathroom break for ${petName}`, due_time: '07:30' },
-        { title: `Breakfast & fresh water refill`, due_time: '08:00' },
-        { title: `Midday potty break or quick play session`, due_time: '13:00' },
-        { title: `Evening walk & exercise`, due_time: '18:30' },
-        { title: `Dinner feeding`, due_time: '19:30' },
-        { title: `Coat brushing & paw check`, due_time: '20:30' },
-        { title: 'Teeth brushing & dental chew', due_time: '21:00' },
-        { title: 'Monthly flea & tick preventative check', due_time: null },
-        { title: 'Monthly weight & body condition check', due_time: null },
-      ]
-    : isCat
-    ? [
-        { title: `Breakfast & fresh water bowl refill`, due_time: '08:00' },
-        { title: `Clean litter box`, due_time: '09:00' },
-        { title: `Interactive playtime (laser/wand toy)`, due_time: '14:00' },
-        { title: `Dinner feeding`, due_time: '19:00' },
-        { title: `Evening litter box scoop`, due_time: '21:00' },
-        { title: `Gentle coat brushing`, due_time: null },
-        { title: 'Monthly flea/worm prevention check', due_time: null },
-      ]
-    : [
-        { title: `Morning feeding & fresh water for ${petName}`, due_time: '08:30' },
-        { title: `Enclosure / cage spot clean`, due_time: '11:00' },
-        { title: `Evening feeding`, due_time: '18:30' },
-        { title: `Health & behavior check`, due_time: null },
-      ]
+  if (programType === 'training' || promptLower.includes('puppy') || promptLower.includes('train') || promptLower.includes('crate')) {
+    return {
+      title: `${petName}'s Training & Habit Checklist`,
+      items: [
+        { title: `Morning potty break & praise immediately upon waking`, due_time: '07:00' },
+        { title: `Short 10-minute focus training session (Sit, Stay, Recall)`, due_time: '09:30' },
+        { title: `Crate relaxation & chew toy quiet time`, due_time: '11:00' },
+        { title: `Midday potty break & leash walking practice`, due_time: '13:00' },
+        { title: `Interactive puzzle toy / mental enrichment session`, due_time: '16:00' },
+        { title: `Evening leash walk with loose leash reinforcement`, due_time: '18:00' },
+        { title: `Final nighttime potty trip before bed`, due_time: '22:00' },
+      ],
+    }
+  }
 
+  if (programType === 'post_surgery' || promptLower.includes('surgery') || promptLower.includes('post-op') || promptLower.includes('recovery') || promptLower.includes('spay') || promptLower.includes('neuter')) {
+    return {
+      title: `${petName}'s Post-Op Recovery Protocol`,
+      items: [
+        { title: `Morning incision site inspection (check for redness/discharge)`, due_time: '08:00' },
+        { title: `Morning pain relief / antibiotic administration with food`, due_time: '08:30' },
+        { title: `Ensure E-collar (cone) is securely fitted & comfortable`, due_time: '11:00' },
+        { title: `Short on-leash potty break only (no jumping/running)`, due_time: '13:00' },
+        { title: `Evening pain relief medication`, due_time: '19:30' },
+        { title: `Evening incision inspection & clean bedding check`, due_time: '21:00' },
+        { title: `Schedule suture removal / vet follow-up (Day 10-14)`, due_time: null },
+      ],
+    }
+  }
+
+  if (programType === 'senior' || promptLower.includes('senior') || promptLower.includes('arthritis') || promptLower.includes('joint')) {
+    return {
+      title: `${petName}'s Senior Pet Wellness & Joint Care`,
+      items: [
+        { title: `Morning joint supplement (Glucosamine/Omega-3) with breakfast`, due_time: '08:00' },
+        { title: `Gentle low-impact morning stroll on soft grass`, due_time: '09:00' },
+        { title: `Fresh orthopedic bed adjustment & water refill check`, due_time: '12:00' },
+        { title: `Gentle massage / range of motion stretching`, due_time: '16:00' },
+        { title: `Evening meal & prescribed joint/mobility medication`, due_time: '19:00' },
+        { title: `Check paw pads, nails & mobility comfort`, due_time: null },
+      ],
+    }
+  }
+
+  if (programType === 'travel' || promptLower.includes('travel') || promptLower.includes('flight') || promptLower.includes('trip') || promptLower.includes('board')) {
+    return {
+      title: `${petName}'s Travel & Boarding Checklist`,
+      items: [
+        { title: `Pack vaccination certificates & medical history records`, due_time: null },
+        { title: `Pack 7-day pre-portioned food bags and favorite treats`, due_time: null },
+        { title: `Check microchip contact info is up to date`, due_time: null },
+        { title: `Pack collapsible travel water bowl and bottled water`, due_time: null },
+        { title: `Pack favorite blanket / comforting scent toy`, due_time: null },
+        { title: `Pack travel harness, seatbelt attachment, or carrier`, due_time: null },
+        { title: `Light meal 3 hours prior to departure to prevent motion sickness`, due_time: '06:00' },
+      ],
+    }
+  }
+
+  // General specialized care checklist fallback
   return {
-    title: `${petName}'s Daily Care Routine`,
-    items,
+    title: `${petName}'s Specialized Care Plan`,
+    items: [
+      { title: `Morning wellness and vital check for ${petName}`, due_time: '08:00' },
+      { title: `Fresh filtered water bowl refill & clean`, due_time: '08:30' },
+      { title: `Midday engagement & mental stimulation activity`, due_time: '13:00' },
+      { title: `Coat grooming & teeth check`, due_time: '18:00' },
+      { title: `Evening health and behavior check`, due_time: '20:30' },
+    ],
   }
 }
