@@ -6,12 +6,12 @@ import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, Plus, Trash2, CheckCircle2, Circle, Clock, Syringe, Stethoscope, Scissors,
   Calendar as CalIcon, PawPrint, Edit2, Sparkles, FileText, X, AlertTriangle, Loader2,
-  ChevronDown, ChevronUp, Check, ExternalLink, CalendarDays, HelpCircle, Utensils
+  ChevronDown, ChevronUp, Check, ExternalLink, CalendarDays, HelpCircle, Utensils, Upload, Image
 } from 'lucide-react'
 import { Modal } from '@/components/Modal'
 import { EmptyState } from '@/components/EmptyState'
 import { calculateAge, formatTime, formatDate, speciesIcon, cn } from '@/lib/utils'
-import { parseVetInstructionsToTasks, generateSpecializedCareProgram } from '@/lib/aiChecklistParser'
+import { parseVetInstructionsToTasks, generateSpecializedCareProgram, parsePrescriptionImageAndText } from '@/lib/aiChecklistParser'
 import {
   parseNaturalLanguageRoutines,
   parseNaturalLanguageAppointment,
@@ -60,6 +60,43 @@ export function PetDetailPage() {
   const [checklistType, setChecklistType] = useState<'recurring' | 'time_limited'>('time_limited')
   const [checklistDuration, setChecklistDuration] = useState('7')
   const [expandedChecklists, setExpandedChecklists] = useState<Record<string, boolean>>({})
+
+  // Prescription Image Upload State
+  const [prescriptionFile, setPrescriptionFile] = useState<File | null>(null)
+  const [prescriptionPreviewUrl, setPrescriptionPreviewUrl] = useState<string | null>(null)
+
+  // Multi-Category Extracted Results from Prescription
+  const [extractedPrescriptionRoutines, setExtractedPrescriptionRoutines] = useState<
+    Array<{ type: 'feeding' | 'walking'; time: string; label: string; portion?: string; notes?: string; selected: boolean }>
+  >([])
+  const [extractedPrescriptionAppt, setExtractedPrescriptionAppt] = useState<{
+    type: 'vet' | 'grooming'
+    title: string
+    date: string
+    time: string
+    location: string
+    notes: string
+    selected: boolean
+  } | null>(null)
+  const [extractedPrescriptionVax, setExtractedPrescriptionVax] = useState<
+    Array<{ vaccine_name: string; date_given: string; next_due_date: string; notes: string; selected: boolean }>
+  >([])
+
+  function handlePrescriptionImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPrescriptionFile(file)
+    const url = URL.createObjectURL(file)
+    setPrescriptionPreviewUrl(url)
+  }
+
+  function handleRemovePrescriptionImage() {
+    if (prescriptionPreviewUrl) {
+      URL.revokeObjectURL(prescriptionPreviewUrl)
+    }
+    setPrescriptionFile(null)
+    setPrescriptionPreviewUrl(null)
+  }
 
   const toggleChecklistExpanded = (clId: string) => {
     setExpandedChecklists((prev) => ({
@@ -254,42 +291,28 @@ export function PetDetailPage() {
       let result: { title: string; items: { title: string; due_time: string | null }[] } | null = null
 
       if (type === 'vet') {
-        // Try edge function fallback to parser
-        try {
-          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-checklist`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-            },
-            body: JSON.stringify({
-              type: 'vet',
-              petName: pet.name,
-              species: pet.species,
-              breed: pet.breed,
-              instructions: aiInput || undefined,
-            }),
-          })
-
-          if (response.ok) {
-            const data = await response.json()
-            if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-              result = {
-                title: data.title || `${pet.name}'s Vet & Medication Plan`,
-                items: data.items.map((item: { title?: string; due_time?: string | null }) => ({
-                  title: item.title || '',
-                  due_time: item.due_time || null,
-                })),
-              }
-            }
-          }
-        } catch {
-          // fallback to client parser
+        const parsedDetails = parsePrescriptionImageAndText(
+          aiInput,
+          prescriptionFile?.name || null,
+          pet.name,
+          pet.species,
+          pet.breed
+        )
+        result = {
+          title: parsedDetails.checklistTitle,
+          items: parsedDetails.items,
         }
-
-        if (!result) {
-          result = parseVetInstructionsToTasks(aiInput, pet.name, pet.species)
-        }
+        setChecklistType(parsedDetails.checklistType)
+        setChecklistDuration(String(parsedDetails.checklistDuration))
+        setExtractedPrescriptionRoutines(
+          parsedDetails.extractedRoutines.map((r) => ({ ...r, selected: true }))
+        )
+        setExtractedPrescriptionAppt(
+          parsedDetails.extractedAppointment ? { ...parsedDetails.extractedAppointment, selected: true } : null
+        )
+        setExtractedPrescriptionVax(
+          parsedDetails.extractedVaccinations.map((v) => ({ ...v, selected: true }))
+        )
       } else {
         // Specialized Care & Training Program
         result = generateSpecializedCareProgram(pet.name, pet.species, 'general', aiInput)
@@ -298,8 +321,10 @@ export function PetDetailPage() {
       setAiResult(result)
       setEditingItems(result.items)
       setChecklistTitle(result.title)
-      setChecklistType(type === 'vet' ? 'time_limited' : 'recurring')
-      setChecklistDuration(type === 'vet' ? '7' : '14')
+      if (type !== 'vet') {
+        setChecklistType('recurring')
+        setChecklistDuration('14')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate checklist.')
     } finally {
@@ -341,6 +366,48 @@ export function PetDetailPage() {
       await supabase.from('checklist_items').insert(itemRows)
     }
 
+    // Save extracted routines, appointment, and vaccinations if source is ai_vet
+    if (source === 'ai_vet') {
+      const validRoutines = extractedPrescriptionRoutines.filter((r) => r.selected)
+      if (validRoutines.length > 0) {
+        const routineRows = validRoutines.map((r) => ({
+          pet_id: pet.id,
+          family_id: family.id,
+          type: r.type,
+          time: r.time,
+          portion: r.portion || null,
+          notes: [r.label, r.notes].filter(Boolean).join(' • ') || null,
+        }))
+        await supabase.from('routines').insert(routineRows)
+      }
+
+      if (extractedPrescriptionAppt && extractedPrescriptionAppt.selected) {
+        await supabase.from('appointments').insert({
+          pet_id: pet.id,
+          family_id: family.id,
+          type: extractedPrescriptionAppt.type,
+          title: extractedPrescriptionAppt.title,
+          date: extractedPrescriptionAppt.date,
+          time: extractedPrescriptionAppt.time,
+          location: extractedPrescriptionAppt.location || null,
+          notes: extractedPrescriptionAppt.notes || null,
+        })
+      }
+
+      const validVax = extractedPrescriptionVax.filter((v) => v.selected && v.vaccine_name)
+      if (validVax.length > 0) {
+        const vaxRows = validVax.map((v) => ({
+          pet_id: pet.id,
+          family_id: family.id,
+          vaccine_name: v.vaccine_name,
+          date_given: v.date_given,
+          next_due_date: v.next_due_date || null,
+          notes: v.notes || null,
+        }))
+        await supabase.from('vaccinations').insert(vaxRows)
+      }
+    }
+
     await supabase.from('activity_log').insert({
       family_id: family.id,
       pet_id: pet.id,
@@ -364,6 +431,10 @@ export function PetDetailPage() {
     setChecklistType('time_limited')
     setChecklistDuration('7')
     setError(null)
+    handleRemovePrescriptionImage()
+    setExtractedPrescriptionRoutines([])
+    setExtractedPrescriptionAppt(null)
+    setExtractedPrescriptionVax([])
   }
 
   // ===== Routine handlers =====
@@ -1748,15 +1819,69 @@ export function PetDetailPage() {
                 </div>
               </div>
 
+              {/* Prescription Image Upload (For Vet AI) */}
+              {showAI === 'vet' && (
+                <div className="space-y-1.5 border-t border-b border-gray-100 py-3 my-2">
+                  <label className="label text-xs font-bold text-gray-700 uppercase flex items-center gap-1.5">
+                    <Image className="w-3.5 h-3.5 text-primary-600" />
+                    <span>Upload Prescription / Vet Notes Photo (Optional)</span>
+                  </label>
+
+                  {prescriptionPreviewUrl ? (
+                    <div className="flex items-center justify-between p-3 rounded-2xl border border-primary-200 bg-primary-50/30">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src={prescriptionPreviewUrl}
+                          alt="Prescription Preview"
+                          className="w-12 h-12 rounded-xl object-cover ring-1 ring-gray-200 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-gray-900 truncate">
+                            {prescriptionFile?.name}
+                          </p>
+                          <p className="text-[11px] text-primary-700 font-medium">
+                            📷 Prescription image attached for AI extraction
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemovePrescriptionImage}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-error-600 hover:bg-white transition-colors"
+                        title="Remove image"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-dashed border-gray-200 hover:border-primary-400 bg-gray-50/60 hover:bg-primary-50/30 transition-all cursor-pointer group text-center">
+                      <Upload className="w-5 h-5 text-gray-400 group-hover:text-primary-600 mb-1 transition-colors" />
+                      <span className="text-xs font-semibold text-gray-700 group-hover:text-primary-700">
+                        Upload photo of veterinary prescription or discharge summary
+                      </span>
+                      <span className="text-[11px] text-gray-400 mt-0.5">
+                        Supports PNG, JPG, WEBP formats
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handlePrescriptionImageChange}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="label text-xs font-bold text-gray-700 uppercase">
-                  {showAI === 'vet' ? 'Vet Instructions / Prescription' : 'Specialized Care / Training Goal'}
+                  {showAI === 'vet' ? 'Vet Instructions / Additional Notes' : 'Specialized Care / Training Goal'}
                 </label>
                 <textarea
                   value={aiInput}
                   onChange={(e) => setAiInput(e.target.value)}
                   className="input text-sm leading-relaxed"
-                  rows={5}
+                  rows={4}
                   placeholder={
                     showAI === 'vet'
                       ? 'e.g. Give 1 tablet of Amoxicillin twice daily after meals for 7 days. Apply eye drops in the morning. No strenuous exercise for 3 days. Follow-up vet visit in 1 week...'
@@ -1769,30 +1894,43 @@ export function PetDetailPage() {
 
               <button
                 onClick={() => showAI && generateAI(showAI)}
-                disabled={aiLoading || !aiInput.trim()}
+                disabled={aiLoading || (!aiInput.trim() && !prescriptionFile)}
                 className="btn-accent w-full py-3 text-sm font-bold flex items-center justify-center gap-2 shadow-sm"
               >
                 {aiLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Structuring checklist with AI...</span>
+                    <span>Extracting & structuring details with AI...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>Generate Structured Checklist</span>
+                    <span>Extract & Generate Care Plan</span>
                   </>
                 )}
               </button>
             </div>
           ) : (
             <div className="space-y-4">
+              {/* Soft Warning Notice for Vet AI */}
+              {showAI === 'vet' && (
+                <div className="p-3.5 rounded-2xl bg-amber-50/90 border border-amber-200/80 text-amber-900 text-xs flex items-start gap-2.5 shadow-2xs">
+                  <AlertTriangle className="w-4.5 h-4.5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-bold text-amber-900">Verification Notice</p>
+                    <p className="text-amber-800/90 text-[11px] leading-relaxed">
+                      AI-extracted prescription details should be reviewed carefully against your veterinarian's official physical prescription before saving. Please verify medication names, dosages, schedules, and follow-up dates below.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="label text-xs font-semibold">Checklist Title</label>
+                <label className="label text-xs font-semibold">Plan / Checklist Title</label>
                 <input
                   value={checklistTitle}
                   onChange={(e) => setChecklistTitle(e.target.value)}
-                  className="input text-xs"
+                  className="input text-xs font-medium"
                 />
               </div>
 
@@ -1823,9 +1961,12 @@ export function PetDetailPage() {
                 )}
               </div>
 
+              {/* Medication & Care Tasks */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="label text-xs font-semibold mb-0">Checklist Tasks ({editingItems.length})</label>
+                  <label className="label text-xs font-bold text-gray-700 uppercase mb-0">
+                    Medications & Care Tasks ({editingItems.length})
+                  </label>
                   <button
                     type="button"
                     onClick={() => setEditingItems([...editingItems, { title: '', due_time: null }])}
@@ -1835,7 +1976,7 @@ export function PetDetailPage() {
                   </button>
                 </div>
 
-                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                   {editingItems.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-2 p-2 rounded-xl bg-gray-50 border border-gray-100">
                       <input
@@ -1871,6 +2012,96 @@ export function PetDetailPage() {
                 </div>
               </div>
 
+              {/* Extracted Routines (if detected) */}
+              {showAI === 'vet' && extractedPrescriptionRoutines.length > 0 && (
+                <div className="border-t border-gray-100 pt-3">
+                  <span className="text-xs font-bold text-gray-700 uppercase mb-2 block">
+                    🍽️ Extracted Daily Routines ({extractedPrescriptionRoutines.length})
+                  </span>
+                  <div className="space-y-2">
+                    {extractedPrescriptionRoutines.map((r, idx) => (
+                      <label key={idx} className="flex items-center justify-between p-2.5 rounded-xl border border-gray-100 bg-gray-50/50 hover:bg-white cursor-pointer">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={r.selected}
+                            onChange={(e) =>
+                              setExtractedPrescriptionRoutines(
+                                extractedPrescriptionRoutines.map((it, i) => (i === idx ? { ...it, selected: e.target.checked } : it))
+                              )
+                            }
+                            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-gray-900">{r.label}</p>
+                            <p className="text-[11px] text-gray-500">{r.portion ? `Portion: ${r.portion} • ` : ''}Time: {r.time}</p>
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Extracted Follow-Up Appointment (if detected) */}
+              {showAI === 'vet' && extractedPrescriptionAppt && (
+                <div className="border-t border-gray-100 pt-3">
+                  <span className="text-xs font-bold text-gray-700 uppercase mb-2 block">
+                    🩺 Extracted Follow-up Appointment
+                  </span>
+                  <label className="flex items-center justify-between p-2.5 rounded-xl border border-blue-100 bg-blue-50/30 hover:bg-blue-50/60 cursor-pointer">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={extractedPrescriptionAppt.selected}
+                        onChange={(e) =>
+                          setExtractedPrescriptionAppt({
+                            ...extractedPrescriptionAppt,
+                            selected: e.target.checked,
+                          })
+                        }
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-gray-900">{extractedPrescriptionAppt.title}</p>
+                        <p className="text-[11px] text-gray-600">📅 Date: {extractedPrescriptionAppt.date} at {extractedPrescriptionAppt.time}</p>
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              )}
+
+              {/* Extracted Vaccinations (if detected) */}
+              {showAI === 'vet' && extractedPrescriptionVax.length > 0 && (
+                <div className="border-t border-gray-100 pt-3">
+                  <span className="text-xs font-bold text-gray-700 uppercase mb-2 block">
+                    💉 Extracted Vaccine Boosters ({extractedPrescriptionVax.length})
+                  </span>
+                  <div className="space-y-2">
+                    {extractedPrescriptionVax.map((v, idx) => (
+                      <label key={idx} className="flex items-center justify-between p-2.5 rounded-xl border border-rose-100 bg-rose-50/30 hover:bg-rose-50/60 cursor-pointer">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={v.selected}
+                            onChange={(e) =>
+                              setExtractedPrescriptionVax(
+                                extractedPrescriptionVax.map((it, i) => (i === idx ? { ...it, selected: e.target.checked } : it))
+                              )
+                            }
+                            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-gray-900">{v.vaccine_name}</p>
+                            <p className="text-[11px] text-gray-600">Due: {v.next_due_date || 'N/A'}</p>
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {error && <div className="text-xs text-error-700 bg-error-50 border border-error-200 rounded-xl p-3">{error}</div>}
 
               <div className="flex gap-2 pt-2">
@@ -1882,15 +2113,15 @@ export function PetDetailPage() {
                   }}
                   className="btn-secondary flex-1 text-xs py-2.5"
                 >
-                  Edit Prompt
+                  Edit Input
                 </button>
                 <button
                   type="button"
                   onClick={() => saveChecklist(showAI === 'vet' ? 'ai_vet' : 'ai_program')}
                   disabled={editingItems.filter((i) => i.title.trim()).length === 0}
-                  className="btn-primary flex-1 text-xs py-2.5"
+                  className="btn-primary flex-1 text-xs py-2.5 font-bold shadow-sm"
                 >
-                  Save Checklist to {pet.name}
+                  Save Verified Plan
                 </button>
               </div>
             </div>

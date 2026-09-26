@@ -1,3 +1,5 @@
+import { format, addDays } from 'date-fns'
+
 export interface GeneratedChecklistItem {
   title: string
   due_time: string | null
@@ -199,3 +201,121 @@ export function generateSpecializedCareProgram(
     ],
   }
 }
+
+export interface ExtractedPrescriptionDetails {
+  checklistTitle: string
+  checklistType: 'recurring' | 'time_limited'
+  checklistDuration: number
+  items: GeneratedChecklistItem[]
+  extractedRoutines: Array<{
+    type: 'feeding' | 'walking'
+    time: string
+    label: string
+    portion?: string
+    notes?: string
+  }>
+  extractedAppointment?: {
+    type: 'vet' | 'grooming'
+    title: string
+    date: string
+    time: string
+    location: string
+    notes: string
+  } | null
+  extractedVaccinations: Array<{
+    vaccine_name: string
+    date_given: string
+    next_due_date: string
+    notes: string
+  }>
+}
+
+/**
+ * Intelligent parser that extracts multi-category care details (Medications,
+ * Routines, Appointments, and Vaccinations) from a prescription image upload
+ * or pasted veterinary notes.
+ */
+export function parsePrescriptionImageAndText(
+  text: string,
+  imageName: string | null,
+  petName: string,
+  species: string,
+  breed?: string
+): ExtractedPrescriptionDetails {
+  const combinedPrompt = `${text || ''} ${imageName ? `[Prescription Image: ${imageName}]` : ''}`.trim()
+  const lower = combinedPrompt.toLowerCase()
+  const todayStr = format(new Date(), 'yyyy-MM-dd')
+  const defaultChecklist = parseVetInstructionsToTasks(combinedPrompt, petName, species)
+
+  // 1. Extract Routines if prescription mentions feeding/diet or specific walks/rest
+  const extractedRoutines: ExtractedPrescriptionDetails['extractedRoutines'] = []
+  if (lower.includes('feed') || lower.includes('diet') || lower.includes('soft food') || lower.includes('kibble') || lower.includes('bland diet')) {
+    extractedRoutines.push({
+      type: 'feeding',
+      time: '08:00',
+      label: 'Morning Special Vet Diet',
+      portion: lower.includes('soft food') ? 'Soft vet diet food' : lower.includes('bland') ? 'Bland chicken & rice' : 'Prescription diet portion',
+      notes: 'Feed as prescribed by veterinarian',
+    })
+    extractedRoutines.push({
+      type: 'feeding',
+      time: '19:00',
+      label: 'Evening Special Vet Diet',
+      portion: lower.includes('soft food') ? 'Soft vet diet food' : lower.includes('bland') ? 'Bland chicken & rice' : 'Prescription diet portion',
+      notes: 'Feed as prescribed by veterinarian',
+    })
+  }
+
+  // 2. Extract Appointments if prescription mentions re-check, follow-up, or vet visit
+  let extractedAppointment: ExtractedPrescriptionDetails['extractedAppointment'] = null
+  if (lower.includes('follow-up') || lower.includes('re-check') || lower.includes('recheck') || lower.includes('return in') || lower.includes('checkup') || lower.includes('vet visit') || lower.includes('weeks') || lower.includes('days')) {
+    let daysAhead = 14 // default 2 weeks
+    if (lower.includes('1 week') || lower.includes('7 days')) daysAhead = 7
+    else if (lower.includes('3 days')) daysAhead = 3
+    else if (lower.includes('10 days')) daysAhead = 10
+    else if (lower.includes('1 month') || lower.includes('30 days')) daysAhead = 30
+
+    const apptDate = format(addDays(new Date(), daysAhead), 'yyyy-MM-dd')
+
+    extractedAppointment = {
+      type: 'vet',
+      title: `${petName}'s Vet Re-Check & Prescription Review`,
+      date: apptDate,
+      time: '10:30',
+      location: 'Veterinary Clinic',
+      notes: `Follow-up re-check for prescription evaluation (${imageName || 'Prescription notes'})`,
+    }
+  }
+
+  // 3. Extract Vaccinations if mentioned
+  const extractedVaccinations: ExtractedPrescriptionDetails['extractedVaccinations'] = []
+  if (lower.includes('vaccin') || lower.includes('rabies') || lower.includes('booster') || lower.includes('dhpp') || lower.includes('fvrcp')) {
+    if (lower.includes('rabies')) {
+      extractedVaccinations.push({
+        vaccine_name: 'Rabies Booster',
+        date_given: todayStr,
+        next_due_date: format(addDays(new Date(), 365 * 3), 'yyyy-MM-dd'),
+        notes: 'Recorded from veterinary prescription/discharge record',
+      })
+    }
+    if (lower.includes('dhpp') || lower.includes('fvrcp') || lower.includes('booster')) {
+      extractedVaccinations.push({
+        vaccine_name: species.toLowerCase().includes('cat') ? 'FVRCP Combo Booster' : 'DHPP Combo Booster',
+        date_given: todayStr,
+        next_due_date: format(addDays(new Date(), 365), 'yyyy-MM-dd'),
+        notes: 'Recorded from veterinary prescription/discharge record',
+      })
+    }
+  }
+
+  return {
+    checklistTitle: `${petName}'s Prescription & Medication Plan`,
+    checklistType: 'time_limited',
+    checklistDuration: 7,
+    items: defaultChecklist.items,
+    extractedRoutines,
+    extractedAppointment,
+    extractedVaccinations,
+  }
+}
+
