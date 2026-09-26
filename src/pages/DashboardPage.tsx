@@ -20,6 +20,7 @@ import {
   Cake,
   Gift,
   PartyPopper,
+  Users,
 } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { formatTime, formatDate, relativeTime, speciesIcon, cn } from '@/lib/utils'
@@ -780,11 +781,11 @@ export function DashboardPage() {
             <span>Schedule Appointment</span>
           </Link>
           <Link
-            to="/app/pets"
+            to="/app/family"
             className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 hover:border-primary-300"
           >
-            <FileText className="w-3.5 h-3.5 text-accent-600" />
-            <span>View Pet Records</span>
+            <Users className="w-3.5 h-3.5 text-purple-600" />
+            <span>Invite Family Member</span>
           </Link>
         </div>
       </div>
