@@ -242,7 +242,7 @@ Choose one of your registered pets above to get personalized advice, or click an
               title="Configure Gemini API Key"
             >
               <Key className="w-3.5 h-3.5" />
-              <span>{hasApiKey ? 'Gemini 2.5 Flash' : 'Connect Gemini Key'}</span>
+              <span>{hasApiKey ? 'Gemini AI Active' : 'Connect Gemini Key'}</span>
             </button>
             <button
               onClick={handleClearChat}

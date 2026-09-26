@@ -38,7 +38,7 @@ export async function getPetConsultantResponse(
   const cleanQuery = query.trim()
   const lower = cleanQuery.toLowerCase()
 
-  // 1. If Gemini API key is available, use real Gemini 2.5 Flash
+  // 1. If Gemini API key is available, use Google Gemini AI
   if (hasGeminiApiKey()) {
     try {
       const geminiResult = await getGeminiConsultantChat(

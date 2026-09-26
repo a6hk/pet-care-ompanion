@@ -1844,7 +1844,7 @@ export function PetDetailPage() {
                   {hasGeminiApiKey() && (
                     <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full flex items-center gap-1">
                       <Sparkles className="w-3 h-3 text-emerald-600" />
-                      <span>Gemini 2.5 Flash</span>
+                      <span>Google Gemini AI</span>
                     </span>
                   )}
                 </div>
@@ -1871,7 +1871,7 @@ export function PetDetailPage() {
                 {aiLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>{hasGeminiApiKey() ? 'Analyzing with Gemini 2.5 Flash...' : 'Structuring checklist with AI...'}</span>
+                    <span>{hasGeminiApiKey() ? 'Analyzing with Gemini AI...' : 'Structuring checklist with AI...'}</span>
                   </>
                 ) : (
                   <>
