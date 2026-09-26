@@ -124,3 +124,17 @@ export interface Profile {
   full_name: string | null
   avatar_url: string | null
 }
+
+export type FeedbackType = 'issue' | 'enhancement' | 'feedback'
+
+export interface FeedbackSubmission {
+  id: string
+  user_id: string
+  user_email: string
+  family_id?: string | null
+  type: FeedbackType
+  summary: string
+  details: string
+  image_url?: string | null
+  created_at: string
+}

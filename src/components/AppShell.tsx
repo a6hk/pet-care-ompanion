@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useFamily } from '@/context/FamilyContext'
-import { PawPrint, LayoutDashboard, Dog, CheckSquare, Calendar, Users, LogOut, Menu, X } from 'lucide-react'
+import { PawPrint, LayoutDashboard, Dog, CheckSquare, Calendar, Users, MessageSquarePlus, LogOut, Menu, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
@@ -11,6 +11,7 @@ const navItems = [
   { to: '/app/checklists', label: 'Checklists', icon: CheckSquare, end: false },
   { to: '/app/calendar', label: 'Calendar', icon: Calendar, end: false },
   { to: '/app/family', label: 'Family', icon: Users, end: false },
+  { to: '/app/feedback', label: 'Feedback', icon: MessageSquarePlus, end: false },
 ]
 
 export function AppShell({ children }: { children: ReactNode }) {
