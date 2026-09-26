@@ -1108,9 +1108,9 @@ export function PetDetailPage() {
                 </span>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    `Recommend a healthy daily feeding and walk schedule for ${pet.name}`,
-                    `Breakfast 1.5 cups at 8:00 AM, lunch potty break at 1:00 PM, evening walk 30m at 6:00 PM, dinner 1.5 cups at 7:30 PM`,
-                    `3 daily puppy meals (8:00 AM, 1:00 PM, 7:00 PM) with 1 cup each and 3 potty walks`,
+                    `Recommend a healthy daily feeding and walk schedule for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species})`,
+                    `Breakfast 1.5 cups at 8:00 AM, lunch potty break at 1:00 PM, evening walk 30m at 6:00 PM, dinner 1.5 cups at 7:30 PM for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species})`,
+                    `3 daily meals (8:00 AM, 1:00 PM, 7:00 PM) with 1 cup each and 3 potty walks for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species})`,
                   ].map((preset, idx) => (
                     <button
                       key={idx}
@@ -1329,9 +1329,9 @@ export function PetDetailPage() {
                 </span>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    `Annual wellness checkup with Dr. Miller at City Vet next Tuesday at 2:30 PM`,
-                    `Full grooming, bath and nail trim at Paws Spa this Friday at 10:00 AM`,
-                    `Dental cleaning and tartar removal at Greenfield Animal Hospital in 2 weeks at 9:00 AM`,
+                    `Annual wellness checkup for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species}) with Dr. Miller at City Vet next Tuesday at 2:30 PM`,
+                    `Full grooming, bath and nail trim for my ${pet.breed ? `${pet.breed} ` : ''}${pet.species} ${pet.name} at Paws Spa this Friday at 10:00 AM`,
+                    `Dental cleaning and checkup for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species}) at Greenfield Animal Hospital in 2 weeks at 9:00 AM`,
                   ].map((preset, idx) => (
                     <button
                       key={idx}
@@ -1503,9 +1503,9 @@ export function PetDetailPage() {
                 </span>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    `Recommend core puppy/dog vaccines for ${pet.name} (${pet.species})`,
-                    `Rabies 3-year given today, next due in 3 years. Bordetella given today, due in 6 months for dog park`,
-                    `DHPP combo booster given on 2024-05-15, next due in 1 year`,
+                    `Recommend core vaccines and boosters for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species})`,
+                    `Rabies 3-year given today for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species}), next due in 3 years. Bordetella given today, due in 6 months`,
+                    `DHPP combo booster given on 2024-05-15 for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species}), next due in 1 year`,
                   ].map((preset, idx) => (
                     <button
                       key={idx}
@@ -1715,9 +1715,9 @@ export function PetDetailPage() {
                 <div className="flex flex-wrap gap-2">
                   {showAI === 'vet' ? (
                     [
-                      `Give 1 tablet Amoxicillin twice daily with meals for 7 days. Eye drops 2x daily. Rest for 3 days.`,
-                      `Ear drops 3 drops twice daily for 10 days. Clean ear canal gently before administration. Follow-up check in 2 weeks.`,
-                      `Post-dental antibiotics once daily in the morning for 5 days. Soft food only.`,
+                      `Give 1 tablet Amoxicillin twice daily with meals for 7 days for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species}). Eye drops 2x daily. Rest for 3 days.`,
+                      `Ear drops 3 drops twice daily for 10 days for my ${pet.breed ? `${pet.breed} ` : ''}${pet.species} ${pet.name}. Clean ear canal gently before administration.`,
+                      `Post-dental antibiotics once daily in the morning for 5 days for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species}). Soft food only.`,
                     ].map((preset, idx) => (
                       <button
                         key={idx}
@@ -1730,10 +1730,10 @@ export function PetDetailPage() {
                     ))
                   ) : (
                     [
-                      `Puppy Crate & Potty Training Checklist`,
-                      `Post-Surgery Recovery & Wound Care Protocol`,
-                      `Senior Pet Mobility & Joint Care Plan`,
-                      `Pet Travel & Boarding Checklist`,
+                      `${pet.breed ? `${pet.breed} ` : ''}${pet.species} Crate & Potty Training Checklist for ${pet.name}`,
+                      `Post-Surgery Recovery & Wound Care Protocol for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species})`,
+                      `Senior ${pet.breed ? `${pet.breed} ` : ''}${pet.species} Mobility & Joint Care Plan for ${pet.name}`,
+                      `Pet Travel & Boarding Prep Checklist for ${pet.name} (${pet.breed ? `${pet.breed} ` : ''}${pet.species})`,
                     ].map((preset, idx) => (
                       <button
                         key={idx}
