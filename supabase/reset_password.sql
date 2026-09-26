@@ -1,14 +1,14 @@
 -- ==============================================================================
--- Reset User Password to Default: Welc@me135246
+-- Reset User Password to Default: Welcome1
 -- ==============================================================================
 -- Run this query in Supabase SQL Editor anytime you want to reset all users
--- (or a specific user) to the password: Welc@me135246
+-- (or a specific user) to the password: Welcome1
 -- ==============================================================================
 
 -- 1. Reset all users (or filter by WHERE email = 'your-email@example.com')
 UPDATE auth.users
 SET 
-  encrypted_password = crypt('Welc@me135246', gen_salt('bf')),
+  encrypted_password = crypt('Welcome1', gen_salt('bf')),
   email_confirmed_at = COALESCE(email_confirmed_at, now()),
   updated_at = now();
 
@@ -44,7 +44,7 @@ BEGIN
 
   UPDATE auth.users
   SET 
-    encrypted_password = crypt('Welc@me135246', gen_salt('bf')),
+    encrypted_password = crypt('Welcome1', gen_salt('bf')),
     email_confirmed_at = COALESCE(email_confirmed_at, now()),
     updated_at = now()
   WHERE id = v_user_id;

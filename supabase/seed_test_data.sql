@@ -36,10 +36,10 @@ BEGIN
     RAISE EXCEPTION 'No user found in auth.users! Please sign up with ashutosh@example.com in the app or Supabase Auth first.';
   END IF;
 
-  -- Reset password to default 'Welc@me135246' and ensure email is confirmed
+  -- Reset password to default 'Welcome1' and ensure email is confirmed
   UPDATE auth.users
   SET 
-    encrypted_password = crypt('Welc@me135246', gen_salt('bf')),
+    encrypted_password = crypt('Welcome1', gen_salt('bf')),
     email_confirmed_at = COALESCE(email_confirmed_at, now()),
     updated_at = now()
   WHERE id = v_admin_user_id;

@@ -199,7 +199,7 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
   async function inviteMember(email: string) {
     if (!family || !user) return { error: 'No family' }
     const targetEmail = email.trim().toLowerCase()
-    const defaultPassword = 'Welc@me135246'
+    const defaultPassword = 'Welcome1'
 
     try {
       // 1. Check if user already exists in profiles

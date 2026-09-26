@@ -105,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      // 1. Try calling the database RPC function to reset directly to 'Welc@me135246'
+      // 1. Try calling the database RPC function to reset directly to 'Welcome1'
       const { error: rpcError } = await supabase.rpc('reset_user_password_to_default', {
         target_email: cleanEmail,
       })

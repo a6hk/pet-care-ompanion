@@ -54,7 +54,7 @@ export function LoginPage() {
       setResetSuccess(true)
       // Auto-populate the login fields for immediate convenience
       setEmail(resetEmail)
-      setPassword('Welc@me135246')
+      setPassword('Welcome1')
       setError(null)
     }
   }
@@ -147,7 +147,7 @@ export function LoginPage() {
                 </p>
                 <div className="mt-2.5 inline-flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-success-200 font-mono text-sm font-bold text-gray-900 shadow-sm">
                   <KeyRound className="w-4 h-4 text-primary-600" />
-                  <span>Welc@me135246</span>
+                  <span>Welcome1</span>
                 </div>
               </div>
             </div>
@@ -174,7 +174,7 @@ export function LoginPage() {
             <div className="p-3 bg-primary-50/70 border border-primary-100 rounded-xl flex items-center justify-between text-xs text-primary-900">
               <span className="font-medium">Default Password:</span>
               <code className="font-mono font-bold bg-white px-2 py-0.5 rounded border border-primary-200 text-primary-700">
-                Welc@me135246
+                Welcome1
               </code>
             </div>
 

@@ -80,7 +80,7 @@ If you prefer not using Docker, you can run the SQL migration scripts in `supaba
 2. `20260925100808_create_rls_policies.sql`
 3. `20260925100825_create_storage_bucket.sql`
 4. `20260925102709_fix_rls_recursion.sql`
-5. `20260925203000_reset_password_rpc.sql` (enables in-app reset to default password `Welc@me135246`)
+5. `20260925203000_reset_password_rpc.sql` (enables in-app reset to default password `Welcome1`)
 
 ### 5. (Optional) Edge Functions for AI & Email Reminders
 The functions in `supabase/functions/` can be deployed via Supabase CLI:

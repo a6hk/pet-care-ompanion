@@ -166,7 +166,7 @@ export function FamilyPage() {
           </p>
           <div className="p-3 bg-primary-50 rounded-xl text-xs text-primary-800 space-y-1">
             <p className="font-semibold">Dev Default Credentials:</p>
-            <p>Password: <code className="bg-white px-1.5 py-0.5 rounded font-mono font-bold text-primary-950">Welc@me135246</code></p>
+            <p>Password: <code className="bg-white px-1.5 py-0.5 rounded font-mono font-bold text-primary-950">Welcome1</code></p>
           </div>
           <div>
             <label className="label">Email address</label>

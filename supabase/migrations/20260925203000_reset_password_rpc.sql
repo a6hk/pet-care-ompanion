@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- Function: reset_user_password_to_default
--- Resets the given user's password to the default 'Welc@me135246'
+-- Resets the given user's password to the default 'Welcome1'
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION reset_user_password_to_default(target_email text)
@@ -28,7 +28,7 @@ BEGIN
 
   UPDATE auth.users
   SET 
-    encrypted_password = crypt('Welc@me135246', gen_salt('bf')),
+    encrypted_password = crypt('Welcome1', gen_salt('bf')),
     email_confirmed_at = COALESCE(email_confirmed_at, now()),
     updated_at = now()
   WHERE id = v_user_id;
