@@ -17,6 +17,9 @@ import {
   Clock,
   Activity,
   HeartHandshake,
+  Cake,
+  Gift,
+  PartyPopper,
 } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { formatTime, formatDate, relativeTime, speciesIcon, cn } from '@/lib/utils'
@@ -141,6 +144,53 @@ export function DashboardPage() {
   const [expandedPets, setExpandedPets] = useState<Record<string, boolean>>({})
 
   const todayDateStr = useMemo(() => new Date().toISOString().split('T')[0], [])
+
+  const upcomingBirthdays = useMemo(() => {
+    if (!pets || pets.length === 0) return []
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const currentYear = today.getFullYear()
+
+    const list: Array<{
+      pet: Pet
+      daysUntil: number
+      turningAge: number
+      nextBirthdayDate: Date
+    }> = []
+
+    for (const pet of pets) {
+      if (!pet.date_of_birth) continue
+      const parts = pet.date_of_birth.split('-').map(Number)
+      if (parts.length !== 3 || parts.some(isNaN)) continue
+
+      const [birthYear, birthMonth, birthDay] = parts
+
+      let nextBday = new Date(currentYear, birthMonth - 1, birthDay)
+      nextBday.setHours(0, 0, 0, 0)
+
+      if (nextBday.getTime() < today.getTime()) {
+        nextBday = new Date(currentYear + 1, birthMonth - 1, birthDay)
+        nextBday.setHours(0, 0, 0, 0)
+      }
+
+      const diffMs = nextBday.getTime() - today.getTime()
+      const daysUntil = Math.round(diffMs / (1000 * 60 * 60 * 24))
+
+      if (daysUntil >= 0 && daysUntil <= 30) {
+        const turningAge = nextBday.getFullYear() - birthYear
+        list.push({
+          pet,
+          daysUntil,
+          turningAge,
+          nextBirthdayDate: nextBday,
+        })
+      }
+    }
+
+    list.sort((a, b) => a.daysUntil - b.daysUntil)
+    return list
+  }, [pets])
 
   const togglePetExpanded = (petId: string) => {
     setExpandedPets((prev) => ({
@@ -610,6 +660,96 @@ export function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Upcoming Pet Birthdays Section (Next 30 Days) */}
+      {upcomingBirthdays.length > 0 && (
+        <div className="card p-5 sm:p-6 bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-purple-500/10 border border-amber-200/80 shadow-xs relative overflow-hidden">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-amber-500/20 text-amber-700 rounded-xl">
+                <Cake className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-gray-900">Upcoming Birthdays</h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500 text-white shadow-2xs">
+                    {upcomingBirthdays.length} {upcomingBirthdays.length === 1 ? 'Birthday' : 'Birthdays'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600">Pets celebrating birthdays in the next 30 days!</p>
+              </div>
+            </div>
+            <PartyPopper className="w-6 h-6 text-amber-500 animate-bounce hidden sm:block" />
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {upcomingBirthdays.map(({ pet, daysUntil, turningAge, nextBirthdayDate }) => {
+              const formattedDate = nextBirthdayDate.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+              })
+
+              const badgeText =
+                daysUntil === 0
+                  ? '🎉 Today!'
+                  : daysUntil === 1
+                  ? '🎂 Tomorrow!'
+                  : `⏳ In ${daysUntil} days`
+
+              const badgeColor =
+                daysUntil === 0
+                  ? 'bg-rose-500 text-white ring-2 ring-rose-300 animate-pulse'
+                  : daysUntil === 1
+                  ? 'bg-amber-500 text-white font-bold'
+                  : 'bg-amber-100 text-amber-800 border border-amber-200'
+
+              return (
+                <Link
+                  key={pet.id}
+                  to={`/app/pets/${pet.id}`}
+                  className="flex items-center gap-3.5 p-3.5 rounded-2xl bg-white/90 backdrop-blur-sm border border-amber-200/60 shadow-2xs hover:shadow-md hover:border-amber-300 transition-all group relative overflow-hidden"
+                >
+                  <div className="relative shrink-0">
+                    {pet.photo_url ? (
+                      <img
+                        src={pet.photo_url}
+                        alt={pet.name}
+                        className="w-14 h-14 rounded-2xl object-cover ring-2 ring-amber-400/80 shadow-xs group-hover:scale-105 transition-transform"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-3xl ring-2 ring-amber-400/80 shadow-xs group-hover:scale-105 transition-transform">
+                        {speciesIcon(pet.species)}
+                      </div>
+                    )}
+                    <div className="absolute -top-1.5 -right-1.5 bg-amber-500 text-white rounded-full p-1 shadow-2xs">
+                      <Gift className="w-3 h-3" />
+                    </div>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <span className="font-bold text-gray-900 text-sm truncate group-hover:text-amber-700 transition-colors">
+                        {pet.name}
+                      </span>
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${badgeColor}`}>
+                        {badgeText}
+                      </span>
+                    </div>
+
+                    <p className="text-xs font-semibold text-amber-700 flex items-center gap-1">
+                      <span>{turningAge > 0 ? `Turning ${turningAge} ${turningAge === 1 ? 'year' : 'years'} old` : 'Celebrating Birthday'}</span>
+                    </p>
+
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      📅 {formattedDate}
+                    </p>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Quick Action Navigation Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-gray-100 shadow-2xs">
