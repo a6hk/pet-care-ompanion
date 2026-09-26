@@ -15,6 +15,7 @@ import { ChecklistsPage } from '@/pages/ChecklistsPage'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { FamilyPage } from '@/pages/FamilyPage'
 import { FeedbackPage } from '@/pages/FeedbackPage'
+import { PetConsultantPage } from '@/pages/PetConsultantPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="/app/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
         <Route path="/app/family" element={<ProtectedRoute><FamilyPage /></ProtectedRoute>} />
         <Route path="/app/feedback" element={<ProtectedRoute><FeedbackPage /></ProtectedRoute>} />
+        <Route path="/app/consultant" element={<ProtectedRoute><PetConsultantPage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/app" replace />} />
       </Routes>
     </>

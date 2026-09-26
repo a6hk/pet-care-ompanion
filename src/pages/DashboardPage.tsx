@@ -787,6 +787,13 @@ export function DashboardPage() {
             <Users className="w-3.5 h-3.5 text-purple-600" />
             <span>Invite Family Member</span>
           </Link>
+          <Link
+            to="/app/consultant"
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 hover:border-purple-300 bg-purple-50/60 text-purple-800 font-semibold"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+            <span>AI Pet Consultant</span>
+          </Link>
         </div>
       </div>
 

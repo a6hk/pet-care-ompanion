@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useFamily } from '@/context/FamilyContext'
-import { PawPrint, LayoutDashboard, Dog, CheckSquare, Calendar, Users, MessageSquarePlus, LogOut, Menu, X } from 'lucide-react'
+import { PawPrint, LayoutDashboard, Dog, CheckSquare, Calendar, Users, MessageSquarePlus, LogOut, Menu, X, Sparkles, ArrowRight } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
@@ -37,7 +37,41 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-1">
+      {/* Featured AI Consultant Button (Highlighted) */}
+      <div className="px-3 pt-4 pb-2">
+        <NavLink
+          to="/app/consultant"
+          onClick={() => setMobileOpen(false)}
+          className={({ isActive }) =>
+            cn(
+              'group relative flex items-center justify-between p-3 rounded-2xl transition-all overflow-hidden border shadow-xs',
+              isActive
+                ? 'bg-gradient-to-r from-purple-700 via-indigo-700 to-primary-700 text-white border-purple-400/50 shadow-md ring-2 ring-purple-300/40'
+                : 'bg-gradient-to-r from-purple-600 via-indigo-600 to-primary-600 text-white border-transparent hover:from-purple-700 hover:to-primary-700 hover:shadow-md'
+            )
+          }
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-1.5 rounded-xl bg-white/20 text-white backdrop-blur-md shrink-0">
+              <Sparkles className="w-4 h-4 animate-pulse text-amber-200" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold leading-tight tracking-tight">AI Consultant</span>
+                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-amber-300 text-purple-950 uppercase tracking-wider">
+                  AI
+                </span>
+              </div>
+              <p className="text-[10px] text-purple-100/90 truncate leading-tight mt-0.5">
+                Adoption, symptoms & care
+              </p>
+            </div>
+          </div>
+          <ArrowRight className="w-3.5 h-3.5 text-purple-200 group-hover:translate-x-0.5 transition-transform shrink-0" />
+        </NavLink>
+      </div>
+
+      <nav className="flex-1 px-3 py-2 space-y-1">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
