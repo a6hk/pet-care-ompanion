@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useFamily } from '@/context/FamilyContext'
-import { PawPrint, LayoutDashboard, Dog, CheckSquare, Calendar, Users, MessageSquarePlus, LogOut, Menu, X, Sparkles, ArrowRight } from 'lucide-react'
+import { PawPrint, LayoutDashboard, Dog, CheckSquare, Calendar, Users, MessageSquarePlus, LogOut, Menu, X, Sparkles, ArrowRight, ShieldCheck } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
@@ -101,6 +101,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             <p className="text-xs text-gray-500 truncate">{profile?.email}</p>
           </div>
         </div>
+        <NavLink
+          to="/admin"
+          className="flex items-center gap-2 px-3 py-1.5 mb-1 rounded-lg text-xs font-semibold text-gray-500 hover:text-emerald-700 hover:bg-emerald-50 transition-colors"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+          <span>Admin Console</span>
+        </NavLink>
         <button onClick={handleSignOut} className="btn-ghost w-full justify-start text-gray-500">
           <LogOut className="w-4 h-4" />
           Sign out

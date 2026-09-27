@@ -1,10 +1,12 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useFamily } from '@/context/FamilyContext'
 import { FullPageLoader } from '@/components/LoadingSpinner'
 import { AppShell } from '@/components/AppShell'
 import { ConfigBanner } from '@/components/ConfigBanner'
 import { isSupabaseConfigured } from '@/lib/supabase'
+import { recordPageView } from '@/lib/trafficTracker'
 import { FamilySetupPage } from '@/pages/FamilySetupPage'
 import { SignUpPage } from '@/pages/auth/SignUpPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
@@ -16,6 +18,8 @@ import { CalendarPage } from '@/pages/CalendarPage'
 import { FamilyPage } from '@/pages/FamilyPage'
 import { FeedbackPage } from '@/pages/FeedbackPage'
 import { PetConsultantPage } from '@/pages/PetConsultantPage'
+import { AdminLoginPage } from '@/pages/admin/AdminLoginPage'
+import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -29,6 +33,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const { session, loading } = useAuth()
+  const location = useLocation()
+
+  useEffect(() => {
+    recordPageView(location.pathname)
+  }, [location.pathname])
 
   if (loading) return <FullPageLoader />
 
@@ -36,8 +45,15 @@ export default function App() {
     <>
       {!isSupabaseConfigured && <ConfigBanner />}
       <Routes>
+        {/* Admin Console Routes */}
+        <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="/admin" element={<AdminDashboardPage />} />
+
+        {/* Public / Auth Routes */}
         <Route path="/signup" element={session ? <Navigate to="/app" replace /> : <SignUpPage />} />
         <Route path="/login" element={session ? <Navigate to="/app" replace /> : <LoginPage />} />
+
+        {/* Application Protected Routes */}
         <Route path="/app" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
         <Route path="/app/pets" element={<ProtectedRoute><PetsPage /></ProtectedRoute>} />
         <Route path="/app/pets/:petId" element={<ProtectedRoute><PetDetailPage /></ProtectedRoute>} />

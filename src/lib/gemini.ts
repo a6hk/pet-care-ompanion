@@ -6,6 +6,7 @@
 
 import type { ExtractedPrescriptionDetails } from './aiChecklistParser'
 import type { Pet } from '@/types'
+import { recordApiCall } from './apiMonitor'
 
 // Candidate models ordered by speed and general availability with automatic cascade fallback
 const CANDIDATE_MODELS = [
@@ -160,10 +161,33 @@ export async function callGeminiApi({
 
   let lastError: any = null
   for (const model of CANDIDATE_MODELS) {
+    const startTime = performance.now()
     try {
-      return await tryModel(model)
+      const result = await tryModel(model)
+      const durationMs = performance.now() - startTime
+      recordApiCall({
+        service: 'gemini_ai',
+        endpoint: `/v1beta/models/${model}:generateContent`,
+        method: 'POST',
+        status: 'success',
+        statusCode: 200,
+        durationMs,
+        metadata: { model, promptLength: prompt.length },
+      })
+      return result
     } catch (err: any) {
       lastError = err
+      const durationMs = performance.now() - startTime
+      recordApiCall({
+        service: 'gemini_ai',
+        endpoint: `/v1beta/models/${model}:generateContent`,
+        method: 'POST',
+        status: 'error',
+        statusCode: err?.message?.includes('429') ? 429 : 500,
+        durationMs,
+        errorMessage: err?.message || 'Gemini invocation failed',
+        metadata: { model },
+      })
       const errMsg = (err?.message || '').toLowerCase()
       // If error is 404, 503 (high demand), 429 (rate limit), 500, or temporary spike, try next candidate
       if (
