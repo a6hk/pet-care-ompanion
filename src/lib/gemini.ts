@@ -7,13 +7,59 @@
 import type { ExtractedPrescriptionDetails } from './aiChecklistParser'
 import type { Pet } from '@/types'
 
-// Candidate models ordered by speed and general availability with automatic cascade fallback
+// Candidate models restricted strictly to user-specified models
 const CANDIDATE_MODELS = [
-  'gemini-flash-latest',
-  'gemini-3-flash-preview',
   'gemini-3.8-flash',
-  'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
 ]
+
+// In-memory cache & in-flight promise deduplication to prevent 429 burst rate limits
+const responseCache = new Map<string, { output: string; timestamp: number }>()
+const inFlightRequests = new Map<string, Promise<string>>()
+const CACHE_TTL_MS = 2 * 60 * 60 * 1000 // 2 hours
+
+function getCacheKey(prompt: string, systemInstruction?: string, responseJson?: boolean): string {
+  return `${prompt.trim()}|${systemInstruction || ''}|${responseJson ? 'json' : 'text'}`
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Fallback emergency knowledge generator if Gemini API free quota is 100% exhausted
+ */
+function generateOfflineEmergencyFallback(prompt: string, responseJson: boolean): string {
+  const p = prompt.toLowerCase()
+
+  if (responseJson) {
+    if (p.includes('lily') || p.includes('lilies')) {
+      return JSON.stringify({
+        content: `### 🚨 CRITICAL EMERGENCY ALERT: LILY TOXICITY\n\n**Lilies (Lilium and Hemerocallis species) are extremely toxic to cats.** Ingesting even a single leaf, petal, or pollen grain can cause severe acute kidney failure within 24 to 72 hours.\n\n#### Immediate Actions:\n1. **Do not wait for symptoms.** Every hour counts.\n2. **Contact your nearest emergency veterinary hospital immediately.**\n3. Take a photo or sample of the plant with you to the clinic.`,
+        category: 'symptoms',
+        isEmergency: true,
+        suggestedActions: [{ label: '📞 Call Emergency Vet', actionType: 'prompt', payload: 'Find 24/7 emergency veterinary clinics nearby' }]
+      })
+    }
+
+    if (p.includes('chocolate') || p.includes('cocoa')) {
+      return JSON.stringify({
+        content: `### ⚠️ EMERGENCY ALERT: CHOCOLATE TOXICITY\n\n**Chocolate contains theobromine and caffeine**, which pets (especially dogs) cannot metabolize. Dark chocolate, baker's chocolate, and cocoa powder are the most dangerous.\n\n#### Immediate Action Steps:\n1. **Determine the type and amount:** Check the wrapper for chocolate type and total grams/ounces consumed.\n2. **Note your pet's weight:** Toxicity depends heavily on pet size.\n3. **Call your veterinarian or Pet Poison Helpline immediately.** Do not induce vomiting without professional guidance.`,
+        category: 'symptoms',
+        isEmergency: true,
+        suggestedActions: [{ label: '📞 Contact Pet Poison Control', actionType: 'prompt', payload: 'What are the symptoms of theobromine poisoning?' }]
+      })
+    }
+
+    // Default structured JSON fallback
+    return JSON.stringify({
+      content: `### ℹ️ AI Service Notice\n\n*The Google Gemini free tier rate limit was temporarily reached (15 requests/minute).*\n\n**Immediate Pet Care Guidance:**\n* Ensure your pet has access to clean, fresh water and a calm resting area.\n* If your pet is showing acute distress, persistent vomiting, or difficulty breathing, contact an emergency veterinarian right away.\n* You can retry your request in 30 seconds once the quota window resets.`,
+      category: 'general',
+      isEmergency: false,
+      suggestedActions: [{ label: '🔄 Retry Consultation', actionType: 'prompt', payload: prompt }]
+    })
+  }
+
+  return `### ℹ️ AI Service Notice (Rate Limit Cooldown)\n\nThe Gemini API rate limit has been reached on the free tier. Please wait 30 seconds for the quota window to reset, or check back shortly. If this is an urgent pet emergency, please contact your nearest 24/7 veterinary clinic directly.`
+}
 
 /**
  * Retrieve the Gemini API key from environment variable or user localStorage
@@ -100,90 +146,139 @@ export async function callGeminiApi({
     throw new Error('Gemini API Key is not configured. Please add VITE_GEMINI_API_KEY to .env or in AI settings.')
   }
 
-  const contents: Array<{ role?: string; parts: Array<{ text: string }> }> = []
-
-  // Add conversation history
-  if (history && history.length > 0) {
-    for (const h of history) {
-      contents.push({
-        role: h.role === 'model' ? 'model' : 'user',
-        parts: [{ text: h.text }],
-      })
+  // 1. Check client-side response cache (only for non-chat history or standalone prompts)
+  const cacheKey = getCacheKey(prompt, systemInstruction, responseJson)
+  if (history.length === 0 && responseCache.has(cacheKey)) {
+    const cached = responseCache.get(cacheKey)!
+    if (Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.output
     }
+    responseCache.delete(cacheKey)
   }
 
-  // Add the current prompt
-  contents.push({
-    role: 'user',
-    parts: [{ text: prompt }],
-  })
-
-  const requestBody: Record<string, any> = {
-    contents,
-    generationConfig: {
-      temperature,
-    },
+  // 2. In-flight deduplication: if exact same call is already pending, reuse it
+  if (inFlightRequests.has(cacheKey)) {
+    return inFlightRequests.get(cacheKey)!
   }
 
-  if (systemInstruction) {
-    requestBody.systemInstruction = {
-      parts: [{ text: systemInstruction }],
+  const executionPromise = (async () => {
+    const contents: Array<{ role?: string; parts: Array<{ text: string }> }> = []
+
+    // Add conversation history
+    if (history && history.length > 0) {
+      for (const h of history) {
+        contents.push({
+          role: h.role === 'model' ? 'model' : 'user',
+          parts: [{ text: h.text }],
+        })
+      }
     }
-  }
 
-  if (responseJson) {
-    requestBody.generationConfig.responseMimeType = 'application/json'
-  }
-
-  async function tryModel(modelName: string): Promise<string> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
+    // Add the current prompt
+    contents.push({
+      role: 'user',
+      parts: [{ text: prompt }],
     })
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '')
-      throw new Error(`Gemini API error (${response.status}): ${errorText || response.statusText}`)
+    const requestBody: Record<string, any> = {
+      contents,
+      generationConfig: {
+        temperature,
+      },
     }
 
-    const data = await response.json()
-    const textOutput = data?.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!textOutput) {
-      throw new Error('Gemini returned an empty response.')
-    }
-    return textOutput
-  }
-
-  let lastError: any = null
-  for (const model of CANDIDATE_MODELS) {
-    try {
-      return await tryModel(model)
-    } catch (err: any) {
-      lastError = err
-      const errMsg = (err?.message || '').toLowerCase()
-      // If error is 404, 503 (high demand), 429 (rate limit), 500, or temporary spike, try next candidate
-      if (
-        errMsg.includes('404') ||
-        errMsg.includes('503') ||
-        errMsg.includes('429') ||
-        errMsg.includes('500') ||
-        errMsg.includes('demand') ||
-        errMsg.includes('not found') ||
-        errMsg.includes('unsupported') ||
-        errMsg.includes('unavailable')
-      ) {
-        console.warn(`Model ${model} unavailable (${err?.message?.slice(0, 80)}...). Trying next candidate model...`)
-        continue
+    if (systemInstruction) {
+      requestBody.systemInstruction = {
+        parts: [{ text: systemInstruction }],
       }
-      throw err
     }
-  }
 
-  throw lastError || new Error('All candidate Gemini models failed.')
+    if (responseJson) {
+      requestBody.generationConfig.responseMimeType = 'application/json'
+    }
+
+    async function tryModelWithBackoff(modelName: string): Promise<string> {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`
+      const maxRetries = 2
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+            const textOutput = data?.candidates?.[0]?.content?.parts?.[0]?.text
+            if (!textOutput) {
+              throw new Error('Gemini returned an empty response.')
+            }
+            return textOutput
+          }
+
+          const errorText = await response.text().catch(() => '')
+          const isRateLimit = response.status === 429 || response.status === 402 || errorText.includes('RESOURCE_EXHAUSTED')
+
+          if (isRateLimit && attempt < maxRetries) {
+            // Exponential backoff with random jitter: 1.5s -> 3.2s
+            const backoffMs = Math.round(Math.pow(2, attempt) * 1500 + Math.random() * 800)
+            console.warn(`[Gemini Rate Limit 429/402] Backing off for ${backoffMs}ms on model ${modelName} (attempt ${attempt + 1}/${maxRetries})...`)
+            await sleep(backoffMs)
+            continue
+          }
+
+          throw new Error(`Gemini API error (${response.status}): ${errorText || response.statusText}`)
+        } catch (err: any) {
+          const isNetworkOr429 = err?.message?.includes('429') || err?.message?.includes('402') || err?.message?.includes('RESOURCE_EXHAUSTED')
+          if (isNetworkOr429 && attempt < maxRetries) {
+            const backoffMs = Math.round(Math.pow(2, attempt) * 1500 + Math.random() * 800)
+            await sleep(backoffMs)
+            continue
+          }
+          throw err
+        }
+      }
+
+      throw new Error(`Exhausted retries for model ${modelName}`)
+    }
+
+    let lastError: any = null
+    for (const model of CANDIDATE_MODELS) {
+      try {
+        const textOutput = await tryModelWithBackoff(model)
+        // Cache successful response
+        if (history.length === 0) {
+          responseCache.set(cacheKey, { output: textOutput, timestamp: Date.now() })
+        }
+        return textOutput
+      } catch (err: any) {
+        lastError = err
+        const errMsg = (err?.message || '').toLowerCase()
+        console.warn(`Model ${model} failed (${err?.message?.slice(0, 100)}). Trying next candidate model...`)
+        // If 429 or quota, short delay before next model to let quota breathe
+        if (errMsg.includes('429') || errMsg.includes('402') || errMsg.includes('resource_exhausted')) {
+          await sleep(1200)
+        }
+      }
+    }
+
+    // If both specified models hit rate limits, return offline emergency fallback so app never crashes
+    console.error('All specified Gemini models reached rate limits. Serving offline fallback.', lastError)
+    const fallbackOutput = generateOfflineEmergencyFallback(prompt, responseJson)
+    return fallbackOutput
+  })()
+
+  inFlightRequests.set(cacheKey, executionPromise)
+
+  try {
+    return await executionPromise
+  } finally {
+    inFlightRequests.delete(cacheKey)
+  }
 }
 
 /**
