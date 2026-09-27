@@ -1,0 +1,3 @@
+Made PawCare: the modern co-parenting app for happy pets and organized families.
+Instant Gemini AI veterinary triage, synchronized care routines, and zero accidental double-walks.
+pet-care-ompanion.vercel.app
