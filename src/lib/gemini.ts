@@ -7,10 +7,10 @@
 import type { ExtractedPrescriptionDetails } from './aiChecklistParser'
 import type { Pet } from '@/types'
 
-// Candidate models restricted strictly to user-specified models
+// Candidate models: always attempt gemini-3.1-flash-lite first, fallback to gemini-3.8-flash on issue
 const CANDIDATE_MODELS = [
-  'gemini-3.8-flash',
   'gemini-3.1-flash-lite',
+  'gemini-3.8-flash',
 ]
 
 // In-memory cache & in-flight promise deduplication to prevent 429 burst rate limits
