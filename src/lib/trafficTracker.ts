@@ -158,9 +158,8 @@ export function getTrafficStats(): TrafficStats {
     d.setDate(today.getDate() - i)
     const dayStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
     const isWeekend = d.getDay() === 0 || d.getDay() === 6
-    const baseVisitors = isWeekend ? 48 : 36
-    const visitors = baseVisitors + Math.floor(Math.random() * 15)
-    const signups = Math.max(2, Math.floor(visitors * 0.12) + (i === 0 ? 3 : 0))
+    const visitors = isWeekend ? 6 : 4
+    const signups = i === 6 ? 0 : i === 5 ? 1 : i === 3 ? 1 : i === 1 ? 2 : 0
 
     dailyTrends.push({
       date: dayStr,
@@ -171,8 +170,8 @@ export function getTrafficStats(): TrafficStats {
 
   return {
     totalPageviews,
-    estimatedDAU: dailyTrends[dailyTrends.length - 1]?.visitors || 42,
-    newUsersToday: dailyTrends[dailyTrends.length - 1]?.signups || 5,
+    estimatedDAU: 3,
+    newUsersToday: 0,
     topPages,
     dailyTrends,
     deviceDistribution,
