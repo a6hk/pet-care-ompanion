@@ -64,6 +64,13 @@ export function FeedbackPage() {
     } catch {}
   }, [])
 
+  const ALLOWED_IMAGE_TYPES: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+  }
+
   // Clipboard paste listener for screenshots
   useEffect(() => {
     function handlePaste(e: ClipboardEvent) {
@@ -72,7 +79,8 @@ export function FeedbackPage() {
       if (!items) return
 
       for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
+        const itemType = items[i].type
+        if (ALLOWED_IMAGE_TYPES[itemType]) {
           const file = items[i].getAsFile()
           if (file) {
             if (file.size > 5 * 1024 * 1024) {
@@ -105,6 +113,11 @@ export function FeedbackPage() {
       return
     }
 
+    if (!ALLOWED_IMAGE_TYPES[file.type]) {
+      setError('Only JPEG, PNG, WebP, and GIF images are allowed')
+      return
+    }
+
     setImageFile(file)
     setError(null)
     const reader = new FileReader()
@@ -124,12 +137,23 @@ export function FeedbackPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!summary.trim()) {
+    const cleanSummary = summary.trim()
+    const cleanDetails = details.trim()
+
+    if (!cleanSummary) {
       setError('Please provide a brief summary of your feedback')
       return
     }
-    if (!details.trim()) {
+    if (cleanSummary.length > 200) {
+      setError('Summary must be 200 characters or less')
+      return
+    }
+    if (!cleanDetails) {
       setError('Please provide details so our team can assist you')
+      return
+    }
+    if (cleanDetails.length > 4000) {
+      setError('Details must be 4000 characters or less')
       return
     }
 
@@ -143,8 +167,8 @@ export function FeedbackPage() {
       if (imageFile) {
         setUploadingImage(true)
         try {
-          const fileExt = imageFile.name.split('.').pop() || 'png'
-          const filePath = `feedback/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`
+          const safeExt = ALLOWED_IMAGE_TYPES[imageFile.type] || 'png'
+          const filePath = `feedback/${Date.now()}-${Math.random().toString(36).slice(2)}.${safeExt}`
 
           const { data: uploadData, error: uploadError } = await supabase.storage
             .from('pet-assets')

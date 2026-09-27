@@ -9,3 +9,6 @@ dist-ssr/
 *.tsbuildinfo
 supabase/.temp/
 supabase/.branches/
+*.pem
+*.key
+*.cert

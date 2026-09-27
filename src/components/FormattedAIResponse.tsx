@@ -144,19 +144,22 @@ export const FormattedAIResponse: React.FC<FormattedAIResponseProps> = ({
               {children}
             </code>
           ),
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(
-                'underline font-medium hover:opacity-80 transition-opacity',
-                isEmergency ? 'text-rose-700' : 'text-primary-600'
-              )}
-            >
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) => {
+            const isSafe = href && /^(https?:|mailto:)/i.test(href.trim())
+            return (
+              <a
+                href={isSafe ? href : undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(
+                  'underline font-medium hover:opacity-80 transition-opacity',
+                  isEmergency ? 'text-rose-700' : 'text-primary-600'
+                )}
+              >
+                {children}
+              </a>
+            )
+          },
         }}
       >
         {content}

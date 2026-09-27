@@ -86,6 +86,13 @@ export function PetFormModalContent({
     setForm((prev) => ({ ...prev, breed: val }))
   }
 
+  const ALLOWED_IMAGE_TYPES: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+  }
+
   async function handleFileSelected(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -96,12 +103,18 @@ export function PetFormModalContent({
       return
     }
 
+    // Validate MIME type allowlist
+    const safeExt = ALLOWED_IMAGE_TYPES[file.type]
+    if (!safeExt) {
+      setFormError('Only JPEG, PNG, WebP, and GIF images are allowed.')
+      return
+    }
+
     setUploadingPhoto(true)
     setFormError(null)
 
     try {
-      const fileExt = file.name.split('.').pop() || 'jpg'
-      const filePath = `pets/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`
+      const filePath = `pets/${Date.now()}-${Math.random().toString(36).slice(2)}.${safeExt}`
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('pet-assets')
@@ -175,7 +188,7 @@ export function PetFormModalContent({
             <input
               type="file"
               ref={fileInputRef}
-              accept="image/*"
+              accept="image/jpeg,image/png,image/webp,image/gif"
               className="hidden"
               onChange={handleFileSelected}
               disabled={uploadingPhoto || isSubmitting}

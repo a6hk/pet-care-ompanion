@@ -102,3 +102,9 @@ Open your browser at [http://localhost:5173](http://localhost:5173).
 ```bash
 npm run build
 ```
+
+---
+
+## Security & Hardening
+
+PawCare follows OWASP security best practices, including Content Security Policy enforcement, input sanitization, safe file upload validation, and AI markdown link verification. For detailed threat models, dependency triage, and production security recommendations, see [SECURITY_RECOMMENDATIONS.md](SECURITY_RECOMMENDATIONS.md).
